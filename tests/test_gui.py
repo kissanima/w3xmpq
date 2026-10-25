@@ -102,6 +102,44 @@ class TestGuiSmoke(unittest.TestCase):
         self.assertTrue(os.path.isdir(outdir))
         win.close()
 
+    def test_extract_selected_pattern(self):
+        """Zip-style single-file extraction: selecting a row and running the
+        ExtractWorker with that row's escaped name must extract exactly it."""
+        import re
+        from w3xmpq.gui.workers import ExtractWorker
+        win = MainWindow()
+        win.open_archive(self.map_path)
+        self._wait(win)
+        ok_rows = [r for r in range(win.table.rowCount())
+                   if win.table.item(r, 5).text() == "ok"]
+        win.table.selectRow(ok_rows[0])
+        names = win._selected_names()
+        self.assertEqual(len(names), 1)
+        self.assertTrue(names[0])
+
+        outdir = os.path.join(self._tmp.name, 'sel')
+        done = {}
+        loop = QEventLoop()
+        w = ExtractWorker(self.map_path, outdir,
+                          pattern="|".join(re.escape(n) for n in names))
+
+        def on_done(manifest):
+            done['manifest'] = manifest
+            loop.quit()
+
+        w.result_ready.connect(on_done)
+        w.failed.connect(lambda e: (done.__setitem__('err', e), loop.quit()))
+        w.start()
+        QTimer.singleShot(30000, loop.quit)
+        loop.exec()
+        self.assertNotIn('err', done)
+        extracted = [r['name'] for r in done['manifest']
+                     if r.get('extracted')]
+        self.assertEqual(extracted, [names[0]])
+        self.assertTrue(os.path.isfile(
+            os.path.join(outdir, names[0].replace('\\', os.sep))))
+        win.close()
+
 
 if __name__ == '__main__':
     unittest.main()

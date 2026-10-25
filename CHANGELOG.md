@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.0.1 — 2026-10-25
+
+**Zip-style browsing in the GUI.**
+
+- **Right-click menu** on the file table: Preview · Extract selected… · Copy name.
+- **Extract selected…** (Ctrl+Shift+E, also on the toolbar) — save just the
+  files you highlighted, like pulling single files out of a zip.
+- The **first recovered file is auto-selected** after opening, so the
+  preview pane shows content immediately.
+- Double-clicking a row focuses the preview and reports its type (text/hex).
+- Friendlier empty state explaining the browse-like-a-zip workflow.
+- Core: extraction manifests now mark written entries (`extracted: true`),
+  so selective extractions report accurate counts.
+
 ## 1.0.0 — 2026-10-25
 
 **The GUI release.** w3xmpq now has a professional windowed interface and

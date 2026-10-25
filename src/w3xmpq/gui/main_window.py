@@ -12,15 +12,16 @@ wires results into widgets.
 """
 
 import os
+import re
 import sys
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QFont, QKeySequence
 from PySide6.QtWidgets import (
     QApplication, QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
-    QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMainWindow, QMessageBox,
-    QPlainTextEdit, QPushButton, QSplitter, QTableWidget, QTableWidgetItem,
-    QVBoxLayout, QWidget)
+    QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMainWindow, QMenu,
+    QMessageBox, QPlainTextEdit, QPushButton, QSplitter, QTableWidget,
+    QTableWidgetItem, QVBoxLayout, QWidget)
 
 from .. import __version__
 from ..core.w3x_header import is_w3x, parse_header
@@ -128,7 +129,10 @@ class MainWindow(QMainWindow):
         self.setAcceptDrops(True)
 
         # Banner
-        self.banner = QLabel("Open a .w3x / .w3m / .mpq file, or drop it here.")
+        self.banner = QLabel(
+            "Open a .w3x / .w3m / .mpq file (Ctrl+O) or drag & drop it "
+            "here — browse it like a zip: click a file to preview, "
+            "double-click to focus the preview, right-click to extract.")
         self.banner.setStyleSheet(
             "QLabel { padding: 8px; background: palette(midlight);"
             " border-radius: 4px; }")
@@ -138,6 +142,9 @@ class MainWindow(QMainWindow):
         # File table + preview
         self.table = FileTable()
         self.table.itemSelectionChanged.connect(self._preview_selected)
+        self.table.cellDoubleClicked.connect(self._focus_preview)
+        self.table.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self._table_menu)
 
         self.preview = QPlainTextEdit()
         self.preview.setReadOnly(True)
@@ -172,6 +179,9 @@ class MainWindow(QMainWindow):
         extract_act = QAction("&Extract…", self)
         extract_act.setShortcut("Ctrl+E")
         extract_act.triggered.connect(self._extract)
+        extract_sel_act = QAction("Extract &selected…", self)
+        extract_sel_act.setShortcut("Ctrl+Shift+E")
+        extract_sel_act.triggered.connect(self._extract_selected)
         quit_act = QAction("E&xit", self)
         quit_act.triggered.connect(self.close)
 
@@ -191,6 +201,7 @@ class MainWindow(QMainWindow):
         menu_file = self.menuBar().addMenu("&File")
         menu_file.addAction(open_act)
         menu_file.addAction(extract_act)
+        menu_file.addAction(extract_sel_act)
         menu_file.addSeparator()
         menu_file.addAction(quit_act)
         menu_tools = self.menuBar().addMenu("&Tools")
@@ -205,8 +216,8 @@ class MainWindow(QMainWindow):
         tb = self.addToolBar("main")
         tb.setMovable(False)
         self._actions = []
-        for a in (open_act, extract_act, report_act, scan_act, rebuild_act,
-                  diff_act, batch_act):
+        for a in (open_act, extract_act, extract_sel_act, report_act,
+                  scan_act, rebuild_act, diff_act, batch_act):
             tb.addAction(a)
             self._actions.append(a)
 
@@ -250,6 +261,11 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(
             "%d blocks: %d recovered, %d failed — %s"
             % (len(entries), ok, failed, self.current_path))
+        # Zip-like feel: show the first recovered file right away.
+        for r in range(self.table.rowCount()):
+            if self.table.item(r, 5).text() == "ok":
+                self.table.selectRow(r)
+                break
 
     def _refresh_banner(self):
         path = self.current_path
@@ -302,14 +318,72 @@ class MainWindow(QMainWindow):
                   ExtractWorker(self.current_path, outdir),
                   on_done=lambda m: self._extract_done(m, outdir))
 
+    def _selected_names(self):
+        """Names of the selected, successfully recovered files."""
+        rows = sorted({i.row() for i in self.table.selectedIndexes()})
+        names = []
+        for r in rows:
+            e = self.table.entry_at(r)
+            if e and e["status"] == "ok" and e["name"]:
+                names.append(e["name"])
+        return names
+
+    def _extract_selected(self):
+        if not self._require_archive():
+            return
+        names = self._selected_names()
+        if not names:
+            QMessageBox.information(
+                self, "Nothing selected",
+                "Select one or more recovered files in the table first.")
+            return
+        outdir = QFileDialog.getExistingDirectory(
+            self, "Extract %d selected file(s) into folder" % len(names))
+        if not outdir:
+            return
+        # extract_archive matches `pattern` (regex) against resolved names.
+        pattern = "|".join(re.escape(n) for n in names)
+        self._run("Extracting %d selected file(s)…" % len(names),
+                  ExtractWorker(self.current_path, outdir, pattern=pattern),
+                  on_done=lambda m: self._extract_done(m, outdir))
+
     def _extract_done(self, manifest, outdir):
-        got = sum(1 for r in manifest if r["status"] == "ok")
-        failed = len(manifest) - got
+        got = sum(1 for r in manifest if r.get("extracted"))
+        failed = sum(1 for r in manifest if r["status"] != "ok")
         QMessageBox.information(
             self, "Extraction finished",
-            "Extracted %d files (%d failed) to:\n%s\n\n"
+            "Extracted %d file(s) (%d failed) to:\n%s\n\n"
             "A manifest.json with SHA-256 hashes was written alongside."
             % (got, failed, outdir))
+
+    # ------------------------------------------------- zip-style browsing
+    def _focus_preview(self, row, _col):
+        e = self.table.entry_at(row)
+        if e and e["status"] == "ok":
+            self.preview.setFocus()
+            self.statusBar().showMessage(
+                "Previewing %s (%s) — use Extract selected… to save it."
+                % (e["name"] or "<unnamed>",
+                   "text" if _is_text(e["name"], e.get("data") or b"")
+                   else "hex"))
+
+    def _table_menu(self, pos):
+        from PySide6.QtGui import QGuiApplication
+        menu = QMenu(self)
+        e = self.table.entry_at(self.table.rowAt(pos.y()))
+        if e and e["status"] == "ok":
+            menu.addAction("Preview", self._focus_preview_row)
+            menu.addAction("Extract selected…",
+                           self._extract_selected)
+            menu.addAction("Copy name",
+                           lambda: QGuiApplication.clipboard().setText(
+                               e["name"] or ""))
+        else:
+            menu.addAction("Extract selected…", self._extract_selected)
+        menu.exec(self.table.viewport().mapToGlobal(pos))
+
+    def _focus_preview_row(self):
+        self._focus_preview(self.table.currentRow(), 0)
 
     # ------------------------------------------------------------ report
     def _report(self):

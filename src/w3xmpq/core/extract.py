@@ -147,6 +147,7 @@ def extract_archive(path, outdir, pattern=None, verbose=True, listfile=None):
             f.write(e['data'])
 
         rec['name'] = candidate
+        rec['extracted'] = True      # distinguish from pattern-skipped
         got += 1
         manifest.append(rec)
         if verbose:
