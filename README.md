@@ -55,10 +55,28 @@ encryption key from the data itself. Verified on real protected maps:
 ## Install
 
 ```bash
-pip install .            # from source (v0.1)
+pip install .            # from source
 ```
 
-Requires Python 3.9+. Zero dependencies.
+Requires Python 3.9+. Zero dependencies for the CLI; the GUI needs
+`pip install PySide6`. No-Python binaries (CLI **and** GUI) are on the
+[releases page](https://github.com/kissanima/w3xmpq/releases).
+
+## GUI (v1.0)
+
+```bash
+w3xmpq gui map.w3x       # or download w3xmpq-gui.exe from releases
+```
+
+A professional windowed interface built on Qt/PySide6:
+
+- **Drag & drop** any `.w3x` / `.w3m` / `.mpq` onto the window
+- **File table** — every recovered block with name, sizes, flags and status
+- **Preview pane** — script/text files as text, everything else as a hex dump
+- **Map banner** — name, author, tileset, recovery count at a glance
+- **Tools** — deprotection report, safety scan, WorldEdit-ready rebuild,
+  two-archive diff, folder batch extraction — all in dialogs, all on
+  background threads so the UI never freezes
 
 ## Quickstart
 
@@ -71,6 +89,7 @@ w3xmpq report  map.w3x                   # deprotection report
 w3xmpq scan   map.w3x                    # map safety scan
 w3xmpq diff   old.w3x new.w3x            # version comparison
 w3xmpq batch  ./maps/ -o out/            # bulk processing
+w3xmpq rebuild map.w3x -o fixed.w3x      # WorldEdit-ready copy
 ```
 
 All commands accept `--json` for machine-readable output. Exit codes:

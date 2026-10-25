@@ -277,7 +277,21 @@ def build_parser():
                      help="output .w3x path")
     pb2.set_defaults(func=cmd_rebuild)
 
+    pg = sub.add_parser("gui",
+                        help="launch the graphical interface (needs PySide6)")
+    pg.add_argument("archive", nargs="?", help="archive to open on start")
+    pg.set_defaults(func=cmd_gui)
+
     return ap
+
+
+def cmd_gui(args):
+    try:
+        from .gui.main_window import main as gui_main
+    except ImportError:
+        _die("the GUI needs PySide6:  pip install PySide6")
+    argv = [args.archive] if args.archive else []
+    return gui_main(argv)
 
 
 def _no_args_welcome():
@@ -299,7 +313,10 @@ def _no_args_welcome():
     print('  w3xmpq scan   "C:\\path\\to\\map.w3x"          # safety scan')
     print('  w3xmpq diff   old.w3x new.w3x               # compare versions')
     print('  w3xmpq batch  "C:\\path\\to\\maps\\" -o out/     # bulk extraction')
+    print('  w3xmpq gui    "C:\\path\\to\\map.w3x"          # graphical UI')
     print()
+    print("Prefer a window over a terminal? Get the GUI binary from the")
+    print("releases page (w3xmpq-gui.exe) or run:  w3xmpq gui")
     print("Or drag a .w3x/.mpq file onto w3xmpq.exe in File Explorer while")
     print("holding nothing — Windows passes the file path as an argument.")
     try:

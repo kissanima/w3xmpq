@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "w3xmpq"
-version = "0.3.0"
+version = "1.0.0"
 description = "Open any MPQ archive or Warcraft III map - recovers encrypted files via a known-plaintext attack, no listfile needed. Pure Python."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -13,8 +13,9 @@ authors = [{ name = "w3xmpq contributors" }]
 keywords = ["mpq", "warcraft3", "wc3", "dota", "extractor", "jass",
             "game-preservation", "reverse-engineering"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 5 - Production/Stable",
     "Environment :: Console",
+    "Environment :: X11 Applications :: Qt",
     "Intended Audience :: Developers",
     "Intended Audience :: End Users/Desktop",
     "License :: OSI Approved :: MIT License",
@@ -36,6 +37,7 @@ Issues = "https://github.com/kissanima/w3xmpq/issues"
 
 [project.scripts]
 w3xmpq = "w3xmpq.cli:main"
+w3xmpq-gui = "w3xmpq.gui.main_window:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

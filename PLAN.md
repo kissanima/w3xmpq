@@ -10,7 +10,8 @@
 > with the use case(s) it serves (`UC-x`); roadmap gained batch mode, map
 > safety scan, archive diff, asset export, and a public library API.
 >
-> Status: **PLAN ONLY** — nothing implemented yet.
+> Status: **SHIPPED v1.0.0** (2026-10-25) — CLI + GUI + analysis layer +
+> rebuild mode, 48 tests, published at github.com/kissanima/w3xmpq.
 
 ---
 
@@ -258,11 +259,10 @@ w3xmpq/
 | ~~**P1 — core hardening**~~ ✅ DONE 2026-10-25 | synthetic-fixture tests (`tests/`: gen_synth MPQ writer + encryptor, flag matrix: stored/zlib/bzip2/encrypted/SINGLE_UNIT/SECTOR_CRC/SPARSE/FIX_KEY/named-key, 25 tests, stdlib unittest); engine fixes: flag-aware sector decoding with expected-length verification (`_decode_sector`), SECTOR_CRC loop fix, SPARSE support, named-key fallback (`recover_named_key`), archive file-handle close, no temp files; known limitation: PKWARE DCL implode (flag 0x100 / mask 0x08, very old maps) not decoded. | ~~100 % fixture pass, both real maps 0 failures~~ ✓ 25/25 tests; DotA 1297/1297 (block 1278 IMPLODE decoy now extracted raw & correct — 206 B vs P0's mask-eaten 205 B, a P0 bug fixed); MooMoo 557/559 byte-identical |
 | ~~**P2 — CLI**~~ ✅ DONE 2026-10-25 | full argparse surface: `open` / `list` / `extract` (--filter, --json, -q) / `diff` / `batch` (+ `--json`, exit codes 0/1/2); refactored `scan_archive` as the single decryption pass shared by all consumers; content-multiset diff (UC-8); batch with index.csv/json (UC-6) | ~~matches §4.1~~ ✓ 34/34 tests incl. new diff/batch/list CLI tests; `list`+`open` verified on real MooMoo map |
 | ~~**P3 — analysis**~~ ✅ DONE 2026-10-25 | `core/w3x_header.py` (HM3W header: name/author/desc/tileset/size/flags), `core/report.py` (deprotection report: script relocation, anti-tamper stubs, missing authoring files, decoy listfile, verdict + unknown-block analyzer with entropy & magic sniffing), `core/safety.py` (JASS stats + severity-ranked suspicious patterns, no risk score per decision), CLI `report`/`scan` + extract banner | ~~reports match known ground truth~~ ✓ verified on real DotA map: all 3 expected findings + verdict correct |
-| **P4 — GUI v0** *(UC-1)* | PySide6 shell: open/archive table/extract-all/progress + drag-and-drop | usable by a non-technical user end-to-end |
-| **P5 — GUI pro** *(UC-3/4/5)* | hex/text/image preview, details pane with key forensics, filters, report+scan dialogs, log panel | matches §4.2 mockup |
-| ~~**P6 — docs & CI**~~ ✅ DONE 2026-10-25 | README (full, with real report output), docs/how-it-works.md, docs/deprotection-patterns.md, CHANGELOG, CONTRIBUTING, bug-report template, CI workflow (3.9–3.13 × Ubuntu/Windows matrix), release workflow (PyInstaller binaries on tag → auto-attach to GitHub Release), pyproject URLs | ~~green CI, README complete~~ ✓ published |
-| ~~**P7 — release**~~ ✅ DONE 2026-10-25 | `github.com/kissanima/w3xmpq` created (public), main pushed, tag v0.1.0 pushed → release workflow builds w3xmpq.exe / w3xmpq-linux / w3xmpq-macos and attaches them to the auto-created GitHub Release | ~~public repo live~~ ✓ |
-| **P8+** | diff view + batch queue in GUI, structured viewers, rebuild mode, MPQ v2–v4, TUI | per roadmap |
+| ~~**P4+P5 — GUI (v1.0)**~~ ✅ DONE 2026-10-25 *(UC-1/3/4/5)* | PySide6 window shipped as `w3xmpq-gui` binaries + `w3xmpq gui` subcommand: drag & drop, file table (name/size/flags/status), text+hex preview, map banner, report/scan/rebuild/diff/batch dialogs, all workers on QThreads; offscreen smoke tests in CI; `--version` headless smoke for frozen binary | ~~usable by a non-technical user end-to-end~~ ✓ 48/48 tests; v1.0.0 released with 6 binaries (CLI+GUI × win/linux/mac) |
+| ~~**P6 — docs & CI**~~ ✅ DONE 2026-10-25 | README (full, with real report output), docs/how-it-works.md, docs/deprotection-patterns.md, docs/library-api.md, CHANGELOG, CONTRIBUTING, bug-report template, CI workflow (3.9–3.13 × Ubuntu/Windows matrix), release workflow (CLI+GUI binaries on tag → auto-attach to GitHub Release, per-release patch notes), pyproject URLs | ~~green CI, README complete~~ ✓ published |
+| ~~**P7 — release**~~ ✅ DONE 2026-10-25 | `github.com/kissanima/w3xmpq` created (public), main pushed, tags v0.1.0→v1.0.0 → release workflow builds w3xmpq(.exe/-linux/-macos) **and** w3xmpq-gui(.exe/-linux/-macos), attaches them to the auto-created GitHub Release; full patch notes retro-applied to every release | ~~public repo live~~ ✓ |
+| **P8+ (post-1.0)** | huffman/ADPCM + real-DCL fuzzing (UC-9), MPQ v2–v4, structured viewers (w3u/wtg), TUI, PyPI publish | per roadmap |
 
 ---
 

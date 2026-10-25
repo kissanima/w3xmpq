@@ -1,5 +1,31 @@
 # Changelog
 
+## 1.0.0 — 2026-10-25
+
+**The GUI release.** w3xmpq now has a professional windowed interface and
+is production-stable.
+
+### New — GUI (`w3xmpq-gui`)
+- PySide6/Qt window: drag & drop archives, file table (name / size /
+  packed / flags / status), preview pane (text for scripts, hex dump for
+  binary), map banner (name, author, tileset, recovery count).
+- All tools available in dialogs: deprotection report, safety scan,
+  WorldEdit-ready `rebuild`, two-archive diff, folder batch extraction.
+- Everything heavy runs on background threads — the UI never freezes.
+- Ships as standalone binaries (`w3xmpq-gui.exe` / `-linux` / `-macos`)
+  alongside the CLI ones, smoke-tested headless in CI.
+- CLI: `w3xmpq gui [archive]` launches the same interface (needs
+  `pip install PySide6`).
+
+### Changed
+- Release workflow builds and smoke-tests **six** binaries per tag
+  (CLI + GUI × Windows/Linux/macOS).
+- `w3xmpq.__version__` single-sourced from package metadata.
+
+### Stability
+- 48 tests (was 46), including offscreen GUI smoke tests (open → scan →
+  table/preview, background extraction).
+
 ## 0.3.0 — 2026-10-25
 
 **Round-trip release: w3xmpq can now write archives, not just read them.**

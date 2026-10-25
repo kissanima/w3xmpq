@@ -14,12 +14,20 @@ jobs:
       matrix:
         include:
           - os: windows-latest
-            artifact: w3xmpq.exe
+            ext: .exe
+            cli: w3xmpq.exe
+            gui: w3xmpq-gui.exe
           - os: ubuntu-latest
-            artifact: w3xmpq-linux
+            ext: ''
+            cli: w3xmpq-linux
+            gui: w3xmpq-gui-linux
           - os: macos-latest
-            artifact: w3xmpq-macos
+            ext: ''
+            cli: w3xmpq-macos
+            gui: w3xmpq-gui-macos
     runs-on: ${{ matrix.os }}
+    env:
+      QT_QPA_PLATFORM: offscreen
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -28,23 +36,32 @@ jobs:
       - name: Install
         run: |
           pip install -e .
-          pip install pyinstaller
+          pip install pyinstaller PySide6
       - name: Test
         run: python -m unittest discover -s tests
-      - name: Build binary
+      - name: Build CLI binary
         run: pyinstaller --onefile --name w3xmpq --paths src src/w3xmpq/_launch.py
-      - name: Smoke test binary
+      - name: Build GUI binary
+        run: pyinstaller --onefile --name w3xmpq-gui --paths src src/w3xmpq/_launch_gui.py
+      - name: Smoke test binaries
         shell: bash
         run: |
-          ./dist/w3xmpq* --version
-          ./dist/w3xmpq* --help > /dev/null
-      - name: Rename artifact
+          ./dist/w3xmpq${{ matrix.ext }} --version
+          ./dist/w3xmpq${{ matrix.ext }} --help > /dev/null
+          ./dist/w3xmpq-gui${{ matrix.ext }} --version
+      - name: Rename artifacts
         shell: bash
-        run: mv dist/w3xmpq* dist/${{ matrix.artifact }} || true
+        run: |
+          mv dist/w3xmpq${{ matrix.ext }} dist/${{ matrix.cli }}
+          mv dist/w3xmpq-gui${{ matrix.ext }} dist/${{ matrix.gui }}
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact }}
-          path: dist/${{ matrix.artifact }}
+          name: ${{ matrix.cli }}
+          path: dist/${{ matrix.cli }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.gui }}
+          path: dist/${{ matrix.gui }}
 
   release:
     needs: build
@@ -61,8 +78,8 @@ jobs:
           body: |
             Standalone binaries — no Python installation needed.
 
-            - `w3xmpq.exe` — Windows
-            - `w3xmpq-linux` — Linux
-            - `w3xmpq-macos` — macOS
+            **GUI** (v1.0+): `w3xmpq-gui.exe` — Windows · `w3xmpq-gui-linux` · `w3xmpq-gui-macos`
 
-            Usage: `w3xmpq extract map.w3x -o out/` (see README).
+            **CLI**: `w3xmpq.exe` — Windows · `w3xmpq-linux` · `w3xmpq-macos`
+
+            Usage (CLI): `w3xmpq extract map.w3x -o out/` (see README).
