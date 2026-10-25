@@ -11,9 +11,11 @@ import os
 import sys
 
 from . import __version__
-from .core.extract import extract_archive, open_archive, scan_archive
+from .core.extract import (extract_archive, load_listfile, open_archive,
+                           scan_archive)
 from .core.diff import diff_archives
 from .core.batch import batch_extract
+from .core.mpq_write import rebuild_map
 from .core.w3x_header import is_w3x, parse_header
 from .core.report import build_report, render_report
 from .core.safety import scan_safety, render_safety
@@ -112,10 +114,12 @@ def _banner(path):
 def cmd_extract(args):
     if not args.quiet:
         _banner(args.archive)
+    listfile = load_listfile(args.listfile) if args.listfile else None
     try:
         manifest = extract_archive(args.archive, args.outdir,
                                    pattern=args.filter,
-                                   verbose=not args.quiet)
+                                   verbose=not args.quiet,
+                                   listfile=listfile)
     except Exception as e:
         _die(e)
     ok = sum(1 for m in manifest if m['status'] == 'ok')
@@ -166,6 +170,17 @@ def cmd_batch(args):
               % (len(index), ok, partial, errors))
         print("index: %s" % os.path.join(args.outdir, 'index.csv'))
     return 1 if (partial or errors) else 0
+
+
+def cmd_rebuild(args):
+    try:
+        names = rebuild_map(args.archive, args.out)
+    except Exception as e:
+        _die(e)
+    print("Rebuilt %s — %d files, standard unencrypted MPQ" %
+          (args.out, len(names)))
+    print("World Editor should now be able to open it.")
+    return 0
 
 
 def cmd_report(args):
@@ -223,6 +238,9 @@ def build_parser():
                     help="only print the final count")
     pe.add_argument("--json", action="store_true",
                     help="print manifest as JSON")
+    pe.add_argument("--listfile", metavar="FILE",
+                    help="extra known filenames (one per line) for "
+                         "hash-probing non-WC3 archives")
     pe.set_defaults(func=cmd_extract)
 
     pd = sub.add_parser("diff", help="compare two archives by content")
@@ -250,6 +268,14 @@ def build_parser():
     ps.add_argument("archive")
     ps.add_argument("--json", action="store_true")
     ps.set_defaults(func=cmd_scan)
+
+    pb2 = sub.add_parser("rebuild",
+                         help="rewrite a (protected) map as a standard, "
+                              "unencrypted MPQ World Editor can open")
+    pb2.add_argument("archive")
+    pb2.add_argument("-o", "--out", required=True,
+                     help="output .w3x path")
+    pb2.set_defaults(func=cmd_rebuild)
 
     return ap
 

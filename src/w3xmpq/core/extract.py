@@ -44,26 +44,40 @@ def open_archive(path):
                      "(magic %r)" % (path, magic))
 
 
-def _probe_known_names(arch):
-    """Hash-probe KNOWN_NAMES -> block index."""
+def load_listfile(path):
+    """Read an external listfile (one filename per line)."""
+    names = []
+    with open(path, 'rb') as f:
+        for line in f.read().decode('utf-8', 'ignore').splitlines():
+            line = line.strip()
+            if line:
+                names.append(line)
+    return names
+
+
+def _probe_known_names(arch, listfile=None):
+    """Hash-probe known names -> block index."""
     by_block = {}
-    for name in KNOWN_NAMES:
+    names = KNOWN_NAMES + (list(listfile) if listfile else [])
+    for name in names:
         he = arch.get_hash_table_entry(name)
         if he is not None:
-            by_block[he.block_table_index] = name
+            by_block.setdefault(he.block_table_index, name)
     return by_block
 
 
-def scan_archive(path):
+def scan_archive(path, listfile=None):
     """Decrypt every recoverable file in `path`.
 
+    `listfile`: optional list of known filenames — their hashes are probed
+    in addition to the built-in WC3 names (useful for non-WC3 archives).
     Returns a list of entry dicts:
       block, flags, size, archived_size, status ("ok"/"FAILED"),
       name, sha256, and `data` (bytes, "ok" entries only).
     The archive file handle is closed before returning.
     """
     arch = open_archive(path)
-    by_block = _probe_known_names(arch)
+    by_block = _probe_known_names(arch, listfile=listfile)
     entries = []
     try:
         for i, b in enumerate(arch.block_table):
@@ -95,10 +109,11 @@ def scan_archive(path):
     return entries
 
 
-def extract_archive(path, outdir, pattern=None, verbose=True):
+def extract_archive(path, outdir, pattern=None, verbose=True, listfile=None):
     """Extract every recoverable file from `path` into `outdir`.
 
     `pattern` (regex, matched against resolved names) limits extraction.
+    `listfile`: extra known filenames for hash-probing (non-WC3 archives).
     Returns the manifest (list of dicts; same fields as scan_archive
     entries minus `data`), and writes manifest.json into `outdir`.
     """
@@ -108,7 +123,7 @@ def extract_archive(path, outdir, pattern=None, verbose=True):
     got, failed = 0, 0
     used_names = set()
     manifest = []
-    for e in scan_archive(path):
+    for e in scan_archive(path, listfile=listfile):
         rec = {k: v for k, v in e.items() if k != 'data'}
         if e['status'] != 'ok' or (rx and not rx.search(e['name'] or '')):
             if e['status'] != 'ok':

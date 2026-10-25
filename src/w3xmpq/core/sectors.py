@@ -23,6 +23,7 @@ import bz2
 import struct
 import zlib
 
+from . import codecs as _codecs
 from .keycrack import (SECTOR_SHIFT_DEFAULT, dec_full, recover_base_key,
                        recover_named_key)
 
@@ -34,14 +35,22 @@ MPQ_FILE_SINGLE_UNIT  = 0x01000000
 MPQ_FILE_SECTOR_CRC   = 0x04000000
 
 
-def decompress_masked(mask, body):
-    """Decompress a sector given its compression-method byte."""
+def decompress_masked(mask, body, expected=None):
+    """Decompress a sector given its compression-method byte.
+
+    `expected` (when known) enables the PKWARE codec, whose output length
+    must be checked to bound decoding.
+    """
     if mask == 0x00:
         return body
     if mask == 0x02:
         return zlib.decompress(body, 15)
     if mask == 0x10:
         return bz2.decompress(body)
+    if mask == 0x08:
+        if expected is None:
+            raise ValueError("pkware codec needs the expected output size")
+        return _codecs.pkware_explode(body, expected)
     raise ValueError("unsupported compression mask 0x%02x" % mask)
 
 
@@ -87,7 +96,7 @@ def _decode_sector(sec, compress, sparse, expected):
 
     if compress:
         try:
-            cand = _post(decompress_masked(sec[0], sec[1:]))
+            cand = _post(decompress_masked(sec[0], sec[1:], expected=expected))
             if len(cand) == expected:
                 return cand
         except Exception:

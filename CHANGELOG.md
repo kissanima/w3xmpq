@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.3.0 — 2026-10-25
+
+**Round-trip release: w3xmpq can now write archives, not just read them.**
+
+- **`rebuild` command (beta)** — turns a protected map back into a
+  standard, WorldEdit-openable archive: strips decoys, resolves the real
+  script (prefers `Scripts\war3map.j` over the anti-tamper stub),
+  injects minimal `wtg/wct/imp` stubs and a true `(listfile)`.
+  One-way and read-only on the original.
+- **`--listfile` import** — supply candidate file names (list or text
+  file) when an archive has no internal `(listfile)`.
+- **PKWARE DCL "explode" codec (beta)** — first step toward full legacy
+  compression support (Diablo/StarCraft archives); validated on synthetic
+  streams and length-guarded. Real-archive fuzzing on the roadmap.
+- **`build_mpq()` library API** — create standard MPQ v0 archives
+  programmatically (powers the synthetic test fixtures and `rebuild`).
+- Version single-sourced from package metadata (`w3xmpq.__version__`).
+- New docs: `docs/library-api.md`.
+- 46 tests (was 41).
+
 ## 0.2.0 — 2026-10-25
 
 **Analysis layer release.**

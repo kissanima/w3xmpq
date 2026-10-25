@@ -2,3 +2,4 @@
 
 from . import mpq, keycrack, sectors, names, extract  # noqa: F401
 from . import w3x_header, report, safety, diff, batch  # noqa: F401
+from . import codecs, mpq_write                        # noqa: F401

@@ -7,7 +7,12 @@ MPQ encryption key from the data itself via a known-plaintext attack on the
 sector offset table.
 """
 
-__version__ = "0.1.0"
+__version__ = None
+try:
+    from importlib.metadata import version as _version
+    __version__ = _version("w3xmpq")
+except Exception:
+    __version__ = "0.3.0"          # source checkout without installation
 
 from .core.mpq import MPQArchive                      # noqa: F401
 from .core.extract import open_archive, extract_archive  # noqa: F401
