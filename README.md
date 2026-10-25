@@ -17,6 +17,20 @@ or a 7-zip-style GUI.
 
 </details>
 
+<details>
+<summary>Texture preview (.blp) — decoded and rendered inline</summary>
+
+![w3xmpq GUI — texture preview](docs/images/gui_texture.png)
+
+</details>
+
+<details>
+<summary>Script preview with JASS syntax highlighting</summary>
+
+![w3xmpq GUI — JASS highlighting](docs/images/gui_script.png)
+
+</details>
+
 ```text
 $ w3xmpq report "DotA v6.83dAI PMV 1.42 EN.w3x"
 
@@ -69,7 +83,9 @@ pip install .            # from source
 ```
 
 Requires Python 3.9+. Zero dependencies for the CLI; the GUI needs
-`pip install PySide6`. No-Python binaries (CLI **and** GUI) are on the
+`pip install PySide6`, and converting a texture to PNG from the command
+line needs `pip install Pillow` (saving it as `.jpg` does not).
+No-Python binaries (CLI **and** GUI) are on the
 [releases page](https://github.com/kissanima/w3xmpq/releases).
 
 ## GUI (v1.0)
@@ -90,9 +106,14 @@ A professional windowed interface built on Qt/PySide6:
   `known` / `guess` (name) and `crack` / `named` / `plain` (key)
 - **Preview pane** (right) — script/text files as text, everything else as
   a hex dump
+- **Texture preview** — `.blp` files are decoded and shown as images,
+  including the JPEG-flavoured textures Warcraft III 1.22+ uses
+- **JASS syntax highlighting** — keywords, natives, numbers and comments
+  are coloured in script previews
 - **Right-click** a file → Preview · Extract selected… · Copy name
 - **Map banner** — name, author, tileset, recovery count at a glance
 - **Scan progress** with a Cancel button for big maps
+- **Find in file** (Ctrl+Shift+F) — search inside a huge script
 - **Tools** — deprotection report, safety scan, WorldEdit-ready rebuild,
   two-archive diff, folder batch extraction — all in dialogs, all on
   background threads so the UI never freezes
@@ -109,6 +130,7 @@ w3xmpq scan   map.w3x                    # map safety scan
 w3xmpq diff   old.w3x new.w3x            # version comparison
 w3xmpq batch  ./maps/ -o out/            # bulk processing
 w3xmpq rebuild map.w3x -o fixed.w3x      # WorldEdit-ready copy
+w3xmpq blp    texture.blp -o out.png     # decode a Warcraft III texture
 ```
 
 All commands accept `--json` for machine-readable output. Exit codes:
@@ -143,6 +165,8 @@ scan provides evidence for review — it is not a verdict.
 
 - [docs/how-it-works.md](docs/how-it-works.md) — the key-recovery math
 - [docs/deprotection-patterns.md](docs/deprotection-patterns.md) — protection patterns and what the report says about each
+- [docs/blp-format.md](docs/blp-format.md) — how Warcraft III textures really work (including the split JPEG frame header)
+- [docs/library-api.md](docs/library-api.md) — the Python API
 
 ## Development
 

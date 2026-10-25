@@ -27,6 +27,22 @@ if HAVE_QT:
     from w3xmpq.gui.main_window import MainWindow
 
 
+def _make_blp1(width=4, height=4):
+    """A classic BLP1 texture: uncompressed BGRA, bottom-up."""
+    import struct
+    header = bytearray(0x9C)
+    header[0:4] = b'BLP1'
+    struct.pack_into('<I', header, 0x04, 0)      # encoding: uncompressed
+    struct.pack_into('<I', header, 0x08, 1)      # alpha present
+    struct.pack_into('<I', header, 0x0C, width)
+    struct.pack_into('<I', header, 0x10, height)
+    pixels = b''.join(bytes([30, 60, 90, 255]) * width
+                      for _ in range(height))
+    struct.pack_into('<I', header, 0x1C, 0x9C)
+    struct.pack_into('<I', header, 0x5C, len(pixels))
+    return bytes(header) + pixels
+
+
 def _make_map(tmp):
     """Write a synthetic .w3x built from the standard sample set."""
     path = os.path.join(tmp, 'gui_test.w3x')
@@ -34,6 +50,39 @@ def _make_map(tmp):
         f.write(gen_synth.build_w3x(gen_synth.build_archive(
             gen_synth.sample_file_set())))
     return path
+
+
+def _make_image_map(tmp):
+    """A .w3x holding a .blp texture and a JASS script."""
+    path = os.path.join(tmp, 'images.w3x')
+    files = [
+        dict(name='war3mapMap.blp', data=_make_blp1(),
+             flags=gen_synth.F_EXISTS),
+        dict(name='war3map.j',
+             data=b'function main takes nothing returns nothing\n'
+                  b'    // a comment\n'
+                  b'    local integer i = 42\n'
+                  b'    set i = i + 1\n'
+                  b'endfunction\n',
+             flags=gen_synth.F_EXISTS),
+    ]
+    with open(path, 'wb') as f:
+        f.write(gen_synth.build_w3x(gen_synth.build_archive(files)))
+    return path
+
+
+def _real_blp_path():
+    """A genuine Warcraft III .blp file, if the game is installed."""
+    base = os.path.abspath(os.path.join(
+        os.path.dirname(__file__), '..', '..', '..'))
+    ui = os.path.join(base, 'UI')
+    if not os.path.isdir(ui):
+        return None
+    for dirpath, _dirs, files in os.walk(ui):
+        for name in sorted(files):
+            if name.lower().endswith('.blp'):
+                return os.path.join(dirpath, name)
+    return None
 
 
 def _make_foldered_map(tmp):
@@ -69,6 +118,7 @@ class TestGuiSmoke(unittest.TestCase):
         cls._tmp = tempfile.TemporaryDirectory()
         cls.map_path = _make_map(cls._tmp.name)
         cls.folders_path = _make_foldered_map(cls._tmp.name)
+        cls.image_path = _make_image_map(cls._tmp.name)
 
     @classmethod
     def tearDownClass(cls):
@@ -339,6 +389,115 @@ class TestGuiSmoke(unittest.TestCase):
             self.assertIn(name_src, ("known", "listfile", "external",
                                      "guess", "unknown"))
             self.assertIn(key_src, ("plain", "crack", "named"))
+        win.close()
+
+
+@unittest.skipUnless(HAVE_QT, "PySide6 not installed")
+class TestGuiPreview(unittest.TestCase):
+    """Image preview and syntax highlighting."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.app = QApplication.instance() or QApplication([])
+        cls._tmp = tempfile.TemporaryDirectory()
+        cls.image_map = _make_image_map(cls._tmp.name)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._tmp.cleanup()
+
+    def _wait(self, win, timeout_ms=30000):
+        loop = QEventLoop()
+        poll = QTimer()
+        poll.timeout.connect(lambda: win.worker is None and loop.quit())
+        poll.start(50)
+        QTimer.singleShot(timeout_ms, loop.quit)
+        loop.exec()
+
+    def _row_for(self, win, suffix):
+        for r in range(win.table.rowCount()):
+            e = win.table.entry_at(r)
+            if e and (e.get("name") or "").endswith(suffix):
+                return r
+        return None
+
+    def test_blp_shows_an_image(self):
+        win = MainWindow()
+        win.open_archive(self.image_map)
+        self._wait(win)
+        row = self._row_for(win, ".blp")
+        self.assertIsNotNone(row, "no .blp entry in the table")
+        win.table.selectRow(row)
+        self.assertEqual(win.preview_stack.currentIndex(), 1,
+                         "the preview should switch to the image page")
+        pixmap = win.image_label.pixmap()
+        self.assertFalse(pixmap.isNull())
+        self.assertGreater(pixmap.width(), 0)
+        win.close()
+
+    def test_text_file_switches_back_to_text(self):
+        win = MainWindow()
+        win.open_archive(self.image_map)
+        self._wait(win)
+        win.table.selectRow(self._row_for(win, ".blp"))
+        self.assertEqual(win.preview_stack.currentIndex(), 1)
+        win.table.selectRow(self._row_for(win, ".j"))
+        self.assertEqual(win.preview_stack.currentIndex(), 0)
+        win.close()
+
+    def test_jass_is_highlighted(self):
+        win = MainWindow()
+        win.open_archive(self.image_map)
+        self._wait(win)
+        win.table.selectRow(self._row_for(win, ".j"))
+        self.assertIsNotNone(win._highlighter,
+                             "JASS files should get a syntax highlighter")
+        win.close()
+
+    def test_jass_classification(self):
+        from w3xmpq.gui.jass_highlight import classify_jass
+        line = "    set i = i + 1   // add one"
+        spans = classify_jass(line)
+        roles = {role for _s, _l, role in spans}
+        self.assertIn("keyword", roles)
+        self.assertIn("comment", roles)
+        # The comment must win over the words inside it.
+        for start, length, role in spans:
+            if role == "comment":
+                self.assertEqual(line[start:start + length],
+                                 "// add one")
+        # "set" is a keyword, "i" is not.
+        keywords = [line[s:s + l] for s, l, r in spans if r == "keyword"]
+        self.assertIn("set", keywords)
+        self.assertNotIn("i", keywords)
+
+    def test_jass_string_and_number(self):
+        from w3xmpq.gui.jass_highlight import classify_jass
+        line = '    local string s = "hello"'
+        spans = classify_jass(line)
+        by_role = {}
+        for start, length, role in spans:
+            by_role.setdefault(role, []).append(line[start:start + length])
+        self.assertIn('"hello"', by_role.get("string", []))
+        self.assertIn("local", by_role.get("keyword", []))
+
+    def test_real_blp_from_the_game(self):
+        path = _real_blp_path()
+        if not path:
+            self.skipTest("no Warcraft III .blp files found")
+        with open(path, "rb") as fh:
+            data = fh.read()
+        win = MainWindow()
+        win.open_archive(self.image_map)
+        self._wait(win)
+        entry = dict(block=0, name="texture.blp", size=len(data),
+                     archived_size=len(data), flags=0, status="ok",
+                     sha256=None, data=data)
+        win.current_entries = [entry]
+        win.table.load_entries([entry])
+        win.table.selectRow(0)
+        self.assertEqual(win.preview_stack.currentIndex(), 1)
+        self.assertFalse(win.image_label.pixmap().isNull())
         win.close()
 
 

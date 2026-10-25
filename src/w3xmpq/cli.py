@@ -212,6 +212,54 @@ def cmd_scan(args):
     return 0
 
 
+def cmd_blp(args):
+    """Convert a Warcraft III texture to an image file."""
+    from .core.blp import BlpError, open_blp
+    try:
+        with open(args.texture, "rb") as fh:
+            blp = open_blp(fh.read())
+    except (OSError, BlpError) as e:
+        _die(e)
+    out = args.out
+    ext = os.path.splitext(out)[1].lower()
+    try:
+        if blp.is_jpeg:
+            if ext in (".jpg", ".jpeg"):
+                # The JPEG flavour is stored as a real JPEG stream once
+                # the split frame header is stitched back together.
+                blob = blp.jpeg_bytes(args.level)
+            else:
+                blob = _jpeg_to_png(blp.jpeg_bytes(args.level), args.level)
+        else:
+            blob = blp.png_bytes(args.level)
+        with open(out, "wb") as fh:
+            fh.write(blob)
+    except (OSError, BlpError, ValueError) as e:
+        _die(e)
+    mip = blp.mipmaps[args.level] if blp.mipmaps else None
+    size = "%dx%d" % (mip.width, mip.height) if mip else "?"
+    print("Wrote %s — %s, %d mipmap level(s), %s encoding"
+          % (out, size, len(blp.mipmaps), blp.kind.upper()))
+    return 0
+
+
+def _jpeg_to_png(jpeg_bytes, level=0):
+    """Convert a JPEG stream to PNG (needs Pillow)."""
+    try:
+        import io
+        from PIL import Image
+    except ImportError:
+        raise ValueError(
+            "converting this texture to PNG needs Pillow "
+            "(pip install Pillow) — or save it as .jpg instead")
+    im = Image.open(io.BytesIO(jpeg_bytes))
+    if im.mode == "CMYK":
+        im = im.convert("RGB")
+    buf = io.BytesIO()
+    im.save(buf, format="PNG")
+    return buf.getvalue()
+
+
 def build_parser():
     ap = argparse.ArgumentParser(
         prog="w3xmpq",
@@ -281,6 +329,15 @@ def build_parser():
     pb2.add_argument("-o", "--out", required=True,
                      help="output .w3x path")
     pb2.set_defaults(func=cmd_rebuild)
+
+    pblp = sub.add_parser("blp",
+                          help="convert a Warcraft III .blp texture to PNG/JPEG")
+    pblp.add_argument("texture", help="path to a .blp file")
+    pblp.add_argument("-o", "--out", required=True,
+                      help="output image path (.png or .jpg)")
+    pblp.add_argument("--level", type=int, default=0,
+                      help="mipmap level to export (0 = full size)")
+    pblp.set_defaults(func=cmd_blp)
 
     pg = sub.add_parser("gui",
                         help="launch the graphical interface (needs PySide6)")

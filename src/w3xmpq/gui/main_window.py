@@ -16,18 +16,21 @@ import re
 import sys
 
 from PySide6.QtCore import QSettings, Qt, Signal
-from PySide6.QtGui import QAction, QFont, QKeySequence, QShortcut, QTextDocument
+from PySide6.QtGui import (QAction, QFont, QImage, QKeySequence, QPixmap,
+                           QShortcut, QTextDocument)
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QDialog, QDialogButtonBox, QFileDialog,
     QFormLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMainWindow,
     QMenu, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton,
-    QSizePolicy, QSplitter, QTableWidget, QTableWidgetItem, QTreeWidget,
-    QTreeWidgetItem, QVBoxLayout, QWidget)
+    QScrollArea, QSizePolicy, QSplitter, QStackedWidget, QTableWidget,
+    QTableWidgetItem, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
 
 from .. import __version__
+from ..core.blp import open_blp
 from ..core.w3x_header import is_w3x, parse_header
 from ..core.report import build_report, render_report
 from ..core.safety import scan_safety, render_safety
+from .jass_highlight import JassHighlighter, is_jass
 from .workers import (BatchWorker, DiffWorker, ExtractWorker, RebuildWorker,
                       ScanWorker)
 
@@ -234,6 +237,7 @@ class MainWindow(QMainWindow):
         self.current_entries = None
         self.current_folder = None      # None = all files
         self.worker = None
+        self._highlighter = None       # JASS syntax highlighter (preview)
         # Session memory: window geometry, splitter, last folders, recents.
         self.settings = QSettings("w3xmpq", "w3xmpq")
         self._build_ui()
@@ -348,8 +352,28 @@ class MainWindow(QMainWindow):
         find_row_widget.setLayout(find_row)
         find_row_widget.setVisible(False)
         find_row_widget.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
-        preview_layout.addWidget(find_row_widget)
-        preview_layout.addWidget(self.preview)
+
+        # The preview is either text (scripts, hex dumps) or a picture
+        # (.blp textures) — a stacked widget switches between them.
+        self.preview_stack = QStackedWidget()
+        text_page = QWidget()
+        text_layout = QVBoxLayout(text_page)
+        text_layout.setContentsMargins(0, 0, 0, 0)
+        text_layout.setSpacing(4)
+        text_layout.addWidget(find_row_widget)
+        text_layout.addWidget(self.preview)
+
+        self.image_scroll = QScrollArea()
+        self.image_scroll.setWidgetResizable(True)
+        self.image_scroll.setAlignment(Qt.AlignCenter)
+        self.image_label = QLabel("No image")
+        self.image_label.setAlignment(Qt.AlignCenter)
+        self.image_label.setBackgroundRole(self.image_label.backgroundRole())
+        self.image_scroll.setWidget(self.image_label)
+
+        self.preview_stack.addWidget(text_page)
+        self.preview_stack.addWidget(self.image_scroll)
+        preview_layout.addWidget(self.preview_stack)
         splitter.addWidget(preview_box)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 3)
@@ -511,6 +535,7 @@ class MainWindow(QMainWindow):
         self.table.load_entries(entries)
         self.folders.load_entries(entries)
         self.preview.clear()
+        self._show_text_page()
         self._set_actions_enabled(True)
         self._refresh_banner()
         self.progress.setVisible(False)
@@ -565,6 +590,7 @@ class MainWindow(QMainWindow):
         if self.table.currentRow() < 0 or \
                 self.table.isRowHidden(self.table.currentRow()):
             self.preview.clear()
+            self._show_text_page()
             for r in range(self.table.rowCount()):
                 if not self.table.isRowHidden(r) \
                         and self.table.item(r, 6).text() == "ok":
@@ -604,18 +630,86 @@ class MainWindow(QMainWindow):
         e = self.table.entry_at(row)
         if e is None or e["status"] != "ok" or e.get("data") is None:
             self.preview.setPlainText("")
+            self._show_text_page()
             return
         name, data = e["name"], e["data"]
+        # A texture is recognised by its magic bytes, not only by its
+        # name: protected maps destroy the original file names.
+        if (name and name.lower().endswith(".blp")) or \
+                data[:4] in (b"BLP1", b"BLP2"):
+            if self._show_image(name, data):
+                return
         if _is_text(name, data):
             text = data[:TEXT_PREVIEW_LIMIT].decode("utf-8", "replace")
             if len(data) > TEXT_PREVIEW_LIMIT:
                 text += "\n… (truncated)"
+            self._show_text_page()
             self.preview.setPlainText(text)
+            self._apply_highlighter(name, text)
         else:
+            self._show_text_page()
             self.preview.setPlainText(
                 "%d bytes — hex dump of first %d:\n\n%s"
                 % (len(data), min(len(data), HEX_PREVIEW_LIMIT),
                    _hexdump(data)))
+
+    # ------------------------------------------------------ image preview
+    def _show_text_page(self):
+        self.preview_stack.setCurrentIndex(0)
+
+    def _show_image(self, name, data):
+        """Render a .blp texture into the preview pane.
+
+        Returns True when the image could be shown.
+        """
+        try:
+            blp = open_blp(data)
+        except Exception as exc:                          # noqa: BLE001
+            self._show_text_page()
+            self.preview.setPlainText("Could not read %s:\n%s"
+                                      % (name, exc))
+            return False
+        try:
+            if blp.is_jpeg:
+                # Warcraft III 1.22+ stores textures as a JPEG whose
+                # frame header is split across the file; the decoder
+                # stitches it back together.
+                blob = blp.jpeg_bytes(0)
+                image = QImage()
+                if not image.loadFromData(blob):
+                    raise ValueError("Qt could not decode the JPEG stream")
+            else:
+                image = QImage.fromData(blp.png_bytes(0))
+                if image.isNull():
+                    raise ValueError("unsupported BLP encoding")
+        except Exception as exc:                          # noqa: BLE001
+            self._show_text_page()
+            self.preview.setPlainText("Could not render %s:\n%s"
+                                      % (name, exc))
+            return False
+        image = image.convertToFormat(QImage.Format_ARGB32)
+        pixmap = QPixmap.fromImage(image)
+        self.image_label.setPixmap(pixmap.scaled(
+            pixmap.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        self.image_scroll.setWidget(self.image_label)
+        self.preview_stack.setCurrentIndex(1)
+        mip = blp.mipmaps[0] if blp.mipmaps else None
+        if mip:
+            self.statusBar().showMessage(
+                "%s — %dx%d %s, %d mipmap level(s)"
+                % (name, mip.width, mip.height, blp.kind.upper(),
+                   len(blp.mipmaps)))
+        return True
+
+    # ------------------------------------------------------- highlighting
+    def _apply_highlighter(self, name, text):
+        """Colour JASS sources; plain text for everything else."""
+        if self._highlighter is not None:
+            self._highlighter.setDocument(None)
+            self._highlighter = None
+        if is_jass(name or ""):
+            self._highlighter = JassHighlighter(self.preview.document())
+            self.preview.setPlainText(text)
 
     # ------------------------------------------------- in-file search
     def _toggle_find(self):

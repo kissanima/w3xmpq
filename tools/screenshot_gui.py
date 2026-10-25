@@ -55,6 +55,19 @@ def shoot(win, path):
     print("wrote", path)
 
 
+def find_real_blp():
+    """A genuine Warcraft III texture, if the game is installed."""
+    base = os.path.abspath(os.path.join(_ROOT, "..", ".."))
+    ui = os.path.join(base, "UI")
+    if not os.path.isdir(ui):
+        return None
+    for dirpath, _dirs, files in os.walk(ui):
+        for name in sorted(files):
+            if name.lower().endswith(".blp"):
+                return os.path.join(dirpath, name)
+    return None
+
+
 def main():
     outdir = sys.argv[1] if len(sys.argv) > 1 else "."
     os.makedirs(outdir, exist_ok=True)
@@ -81,6 +94,11 @@ def main():
         dict(name="Scripts\\war3map.j",
              data=b"// relocated script\n" * 400, flags=gen_synth.F_EXISTS),
     ]
+    real_blp = find_real_blp()
+    if real_blp:
+        with open(real_blp, "rb") as fh:
+            files.append(dict(name="war3mapMap.blp", data=fh.read(),
+                              flags=gen_synth.F_EXISTS))
     files.append(dict(name="(listfile)",
                       data="\n".join([f["name"] for f in files]).encode(),
                       flags=gen_synth.F_EXISTS))
@@ -104,6 +122,24 @@ def main():
     win.folders.setCurrentItem(win.folders.topLevelItem(0))
     app.processEvents()
     shoot(win, os.path.join(outdir, "gui_all_files.png"))
+
+    # 3) Texture preview — a real .blp rendered in the preview pane
+    for r in range(win.table.rowCount()):
+        entry = win.table.entry_at(r)
+        if entry and (entry.get("name") or "").endswith("war3mapMap.blp"):
+            win.table.selectRow(r)
+            app.processEvents()
+            shoot(win, os.path.join(outdir, "gui_texture.png"))
+            break
+
+    # 4) Script preview with JASS syntax highlighting
+    for r in range(win.table.rowCount()):
+        entry = win.table.entry_at(r)
+        if entry and (entry.get("name") or "") == "war3map.j":
+            win.table.selectRow(r)
+            app.processEvents()
+            shoot(win, os.path.join(outdir, "gui_script.png"))
+            break
     win.close()
 
 

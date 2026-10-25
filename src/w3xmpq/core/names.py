@@ -42,6 +42,9 @@ TYPE_HINTS = [
 
 def guess_name(data, idx):
     """Guess a file name from decrypted content. Falls back to block_NNN."""
+    # Texture containers announce themselves with a 4-byte magic.
+    if data[:4] in (b'BLP1', b'BLP2'):
+        return "texture_%03d.blp" % idx
     for magic, name in TYPE_HINTS:
         if data.startswith(magic) or (name == "war3map.j" and magic in data[:20000]
                                       and data[:1].isalpha() or data.startswith(b'//')):

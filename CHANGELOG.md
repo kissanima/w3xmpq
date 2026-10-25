@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.3.0 — 2026-10-26
+
+**Textures, decoded. Scripts, coloured.**
+
+### New — BLP texture decoding
+- **`.blp` files are now decoded and rendered inline in the GUI** — click a texture and see the picture, not a hex dump.
+- New `w3xmpq.core.blp` module: a pure-Python reader for all three Warcraft III texture families —
+  - **BLP1 classic** (uncompressed BGRA and 8-bit palettised, bottom-up rows)
+  - **BLP2 classic** (uncompressed and **DXT1 / DXT3 / DXT5**, including explicit and interpolated alpha)
+  - **BLP1 with a JPEG inside** — the format every texture since WC3 1.22 uses
+- **The split JPEG frame header is reassembled.** Blizzard stores the `FF C0` marker at the end of the shared header block and the frame length/body at the start of every mipmap, so no standard decoder can read the file as-is. `w3xmpq` stitches the halves back together and hands out a valid JPEG stream.
+- New CLI command: `w3xmpq blp texture.blp -o out.png` (or `-o out.jpg`, which needs no extra dependency; `--level N` picks a mipmap level).
+- New `docs/blp-format.md` — the full format write-up, including why these files are CMYK JPEGs that most libraries reject.
+
+### New — script preview
+- **JASS syntax highlighting** in the preview pane: keywords, native functions, numbers, strings, comments and `#preprocessor` lines.
+
+### Changed
+- The scanner now recognises `BLP1`/`BLP2` magic bytes and names unnamed texture blocks `texture_NNN.blp`, so textures stay identifiable in maps whose file names were destroyed.
+- The preview pane is now a stacked view: text/hex on one page, image on the other.
+
+### Stability
+- 76 tests (was 57): BLP decoding for every format family, the JPEG reassembly, DXT colour and alpha tables, the CLI conversion, the image preview and the JASS classifier.
+
 ## 1.2.0 — 2026-10-25
 
 **Preview power and a session that remembers you.**
