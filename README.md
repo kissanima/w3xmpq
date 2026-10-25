@@ -5,7 +5,17 @@
 **w3xmpq** is a pure-Python tool that opens `.mpq` archives and Warcraft III
 `.w3x`/`.w3m` maps, recovers every file — **including encrypted/protected
 ones** — via a known-plaintext attack on the MPQ sector offset table, and
-lets you list, extract, diff and batch-process them from a professional CLI.
+lets you list, extract, diff and batch-process them from a professional CLI
+or a 7-zip-style GUI.
+
+![w3xmpq GUI](docs/images/gui_all_files.png)
+
+<details>
+<summary>Tree view + hex preview</summary>
+
+![w3xmpq GUI — folder tree](docs/images/gui_tree.png)
+
+</details>
 
 ```text
 $ w3xmpq report "DotA v6.83dAI PMV 1.42 EN.w3x"

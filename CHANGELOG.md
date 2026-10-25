@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.3 — 2026-10-25
+
+**Screenshots on the repo page + a tighter window.**
+
+- README now shows the GUI (all-files view and folder-tree view) so the
+  repo page shows what the tool actually looks like.
+- The map banner is capped at two lines, giving the file table and
+  preview pane the remaining height.
+- New `tools/screenshot_gui.py` renders the screenshots offscreen
+  (registering a system font explicitly, since the offscreen platform
+  does not load fonts by default).
+
 ## 1.0.2 — 2026-10-25
 
 **Folder tree view + real names from the archive's own listfile.**

@@ -188,6 +188,8 @@ class MainWindow(QMainWindow):
             " border-radius: 4px; }")
         self.banner.setTextInteractionFlags(Qt.TextSelectableByMouse)
         self.banner.setWordWrap(True)
+        # Keep the banner compact so the file table gets the screen space.
+        self.banner.setMaximumHeight(64)
 
         # Folder tree + file table + preview (7-zip layout)
         self.folders = FolderTree()
