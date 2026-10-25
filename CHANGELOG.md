@@ -1,5 +1,35 @@
 # Changelog
 
+## 1.2.0 — 2026-10-25
+
+**Preview power and a session that remembers you.**
+
+### New
+- **Find in file** (Ctrl+Shift+F) — search inside the previewed file, with
+  match feedback and < > navigation; Escape closes the bar.
+- **"Show" filter** next to the filter box: all files / named only /
+  unnamed only / failed only / encrypted only.
+- **Save preview as…** (Ctrl+S) — save the selected file without
+  extracting the whole archive.
+- **Export file table…** — write the recovered table to CSV or JSON
+  (includes the SHA-256 and the recovery source per file).
+- **Open containing folder** — jump to the map in Explorer/Finder.
+- **Open recent** — the last 10 archives, remembered between sessions.
+- **Session memory** — window geometry, splitter layout and the filter
+  mode are restored on the next start; the last used extract folder is
+  offered as the default.
+
+### Fixed
+- **Crash on closing windows** — the scan worker (a QThread) was released
+  from inside its own result handler, destroying the thread while
+  `run()` was still on the stack. Workers are now released only after the
+  thread has really finished.
+- Keyboard shortcuts are kept alive explicitly instead of relying on
+  garbage collection, which could tear down a live shortcut.
+
+### Verified
+- 57 tests; the GUI suite now runs three times in a row without a crash.
+
 ## 1.1.0 — 2026-10-25
 
 **Browsing core: the table behaves like a real file manager.**

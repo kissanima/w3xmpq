@@ -247,6 +247,87 @@ class TestGuiSmoke(unittest.TestCase):
         self.assertEqual(names, sorted(names))
         win.close()
 
+    def test_show_filter_combo(self):
+        win = MainWindow()
+        win.open_archive(self.folders_path)
+        self._wait(win)
+
+        def visible_names():
+            out = []
+            for r in range(win.table.rowCount()):
+                if not win.table.isRowHidden(r):
+                    e = win.table.entry_at(r)
+                    out.append(e["name"] or "")
+            return out
+
+        win.show_combo.setCurrentText("named only")
+        names = visible_names()
+        self.assertTrue(names)
+        self.assertTrue(all(n for n in names))
+        win.show_combo.setCurrentText("all files")
+        self.assertEqual(len(visible_names()), win.table.rowCount())
+        win.close()
+
+    def test_find_in_preview(self):
+        win = MainWindow()
+        win.open_archive(self.folders_path)
+        self._wait(win)
+        # pick a text file (war3map.j) and search inside it
+        row = None
+        for r in range(win.table.rowCount()):
+            e = win.table.entry_at(r)
+            if e and (e["name"] or "").endswith("war3map.j"):
+                row = r
+                break
+        self.assertIsNotNone(row)
+        win.table.selectRow(row)
+        self.assertIn("function", win.preview.toPlainText())
+        win._toggle_find()
+        win.find_edit.setText("function main")
+        win._find_next()
+        self.assertIn("found", win.find_count.text())
+        win.find_edit.setText("zzz-not-there")
+        self.assertIn("not found", win.find_count.text())
+        win._hide_find()
+        self.assertFalse(win._find_row_widget.isVisible())
+        win.close()
+
+    def test_export_table_and_save_entry(self):
+        import json
+        win = MainWindow()
+        win.open_archive(self.folders_path)
+        self._wait(win)
+        out = os.path.join(self._tmp.name, "table.json")
+        count = win._write_table(out)
+        self.assertEqual(count, len(win.current_entries))
+        with open(out, encoding="utf-8") as f:
+            rows = json.load(f)
+        self.assertEqual(len(rows), count)
+        self.assertIn("name_source", rows[0])
+
+        csv_path = os.path.join(self._tmp.name, "table.csv")
+        win._write_table(csv_path)
+        with open(csv_path, encoding="utf-8") as f:
+            head = f.readline()
+        self.assertIn("sha256", head)
+
+        # save one entry straight from the preview
+        e = next(x for x in win.current_entries if x["status"] == "ok")
+        target = os.path.join(self._tmp.name, "one.bin")
+        n = win._save_entry_to(e, target)
+        self.assertEqual(n, len(e["data"]))
+        with open(target, "rb") as f:
+            self.assertEqual(f.read(), e["data"])
+        win.close()
+
+    def test_session_settings_roundtrip(self):
+        win = MainWindow()
+        win.settings.setValue("last_dir", self._tmp.name)
+        win.show_combo.setCurrentText("named only")
+        win._save_session()
+        self.assertEqual(win.settings.value("show_filter", 0, type=int), 1)
+        win.close()
+
     def test_source_column_reports_recovery_method(self):
         win = MainWindow()
         win.open_archive(self.folders_path)
