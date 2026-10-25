@@ -1,0 +1,63 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            artifact: w3xmpq.exe
+          - os: ubuntu-latest
+            artifact: w3xmpq-linux
+          - os: macos-latest
+            artifact: w3xmpq-macos
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: |
+          pip install -e .
+          pip install pyinstaller
+      - name: Test
+        run: python -m unittest discover -s tests
+      - name: Build binary
+        run: pyinstaller --onefile --name w3xmpq src/w3xmpq/__main__.py
+      - name: Rename artifact
+        shell: bash
+        run: mv dist/w3xmpq* dist/${{ matrix.artifact }} || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/${{ matrix.artifact }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: dist
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          body: |
+            Standalone binaries — no Python installation needed.
+
+            - `w3xmpq.exe` — Windows
+            - `w3xmpq-linux` — Linux
+            - `w3xmpq-macos` — macOS
+
+            Usage: `w3xmpq extract map.w3x -o out/` (see README).

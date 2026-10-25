@@ -1,0 +1,13 @@
+# --- w3xmpq ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.eggs/
+# verification outputs (extracted copyrighted map data must never be committed)
+_verify/
+w3xmpq_out/
+# python envs
+.venv/
+venv/
