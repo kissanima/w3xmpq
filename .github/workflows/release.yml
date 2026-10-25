@@ -32,7 +32,11 @@ jobs:
       - name: Test
         run: python -m unittest discover -s tests
       - name: Build binary
-        run: pyinstaller --onefile --name w3xmpq src/w3xmpq/__main__.py
+        run: pyinstaller --onefile --name w3xmpq --paths src src/w3xmpq/_launch.py
+      - name: Smoke test binary
+        run: |
+          dist/w3xmpq* --version
+          dist/w3xmpq* --help > /dev/null
       - name: Rename artifact
         shell: bash
         run: mv dist/w3xmpq* dist/${{ matrix.artifact }} || true
