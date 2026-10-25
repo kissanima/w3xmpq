@@ -254,7 +254,39 @@ def build_parser():
     return ap
 
 
+def _no_args_welcome():
+    """Friendly screen when launched without arguments (e.g. double-click).
+
+    Instead of argparse's error + instant exit (the console window just
+    flashes), show what the tool can do and pause so the window stays open.
+    """
+    print("w3xmpq %s — open any MPQ archive or Warcraft III map" % __version__)
+    print("No listfile, no keys, no editor required.")
+    print()
+    print("This is a command-line tool. Open a terminal (cmd or PowerShell),")
+    print("then run it from that folder, for example:")
+    print()
+    print('  w3xmpq open   "C:\\path\\to\\map.w3x"          # archive info')
+    print('  w3xmpq list   "C:\\path\\to\\map.w3x"          # file table')
+    print('  w3xmpq extract "C:\\path\\to\\map.w3x" -o out/  # extract all')
+    print('  w3xmpq report "C:\\path\\to\\map.w3x"          # how is it locked?')
+    print('  w3xmpq scan   "C:\\path\\to\\map.w3x"          # safety scan')
+    print('  w3xmpq diff   old.w3x new.w3x               # compare versions')
+    print('  w3xmpq batch  "C:\\path\\to\\maps\\" -o out/     # bulk extraction')
+    print()
+    print("Or drag a .w3x/.mpq file onto w3xmpq.exe in File Explorer while")
+    print("holding nothing — Windows passes the file path as an argument.")
+    try:
+        if sys.stdin is not None and sys.stdin.isatty():
+            input("Press Enter to exit...")
+    except Exception:
+        pass
+    return 0
+
+
 def main(argv=None):
+    if argv is None and len(sys.argv) == 1:
+        return _no_args_welcome()
     args = build_parser().parse_args(argv)
     return args.func(args) or 0
 
