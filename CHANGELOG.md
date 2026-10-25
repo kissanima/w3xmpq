@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.0.2 — 2026-10-25
+
+**Folder tree view + real names from the archive's own listfile.**
+
+### New
+- **Folder tree pane** in the GUI (7-zip layout): folders recovered from
+  file paths are shown on the left; selecting one filters the file table
+  to that folder (and its subfolders). Top-level `(all files)` shows
+  everything.
+- **Internal `(listfile)` is now used** when present: the scanner reads
+  the archive's own listfile and probes those names, so files that
+  neither the built-in name list nor content guessing can identify are
+  shown under their real names instead of `block_NNN`. Applies to the
+  CLI too (`extract`, `list`, `diff`).
+
+### Fixed
+- **Crash on non-ASCII names** — the MPQ hash now uses the low byte of
+  each character (as Storm does) instead of indexing past the encryption
+  table. DotA's listfile contains such names, so listing its files
+  previously raised `KeyError`.
+
+### Verified
+- No regression on the real maps: DotA v6.83dAI PMV 1297/1297 blocks,
+  MooMoo v3.19b Generation X 557/559 (2 are ENCRYPTED+FIX_KEY traps by
+  design), campaign maps 17/17 with real names.
+- 50 tests.
+
 ## 1.0.1 — 2026-10-25
 
 **Zip-style browsing in the GUI.**

@@ -36,6 +36,31 @@ def _make_map(tmp):
     return path
 
 
+def _make_foldered_map(tmp):
+    """A .w3x whose files live in folders (zip-tree test fixture)."""
+    path = os.path.join(tmp, 'folders.w3x')
+    names = ['war3map.j', 'textures\\tex.blp', 'textures\\ui\\plus.blp',
+             'Scripts\\relocated.j']
+    files = [
+        dict(name=names[0],
+             data=b'function main takes nothing returns nothing\n' * 30,
+             flags=gen_synth.F_EXISTS),
+        dict(name=names[1], data=os.urandom(2000),
+             flags=gen_synth.F_EXISTS),
+        dict(name=names[2], data=os.urandom(1000),
+             flags=gen_synth.F_EXISTS),
+        dict(name=names[3], data=b'x' * 500,
+             flags=gen_synth.F_EXISTS),
+        # Real tool-made MPQs embed this; the scanner should use it.
+        dict(name='(listfile)',
+             data=("\n".join(names) + "\n").encode(),
+             flags=gen_synth.F_EXISTS),
+    ]
+    with open(path, 'wb') as f:
+        f.write(gen_synth.build_w3x(gen_synth.build_archive(files)))
+    return path
+
+
 @unittest.skipUnless(HAVE_QT, "PySide6 not installed")
 class TestGuiSmoke(unittest.TestCase):
     @classmethod
@@ -43,6 +68,7 @@ class TestGuiSmoke(unittest.TestCase):
         cls.app = QApplication.instance() or QApplication([])
         cls._tmp = tempfile.TemporaryDirectory()
         cls.map_path = _make_map(cls._tmp.name)
+        cls.folders_path = _make_foldered_map(cls._tmp.name)
 
     @classmethod
     def tearDownClass(cls):
@@ -138,6 +164,40 @@ class TestGuiSmoke(unittest.TestCase):
         self.assertEqual(extracted, [names[0]])
         self.assertTrue(os.path.isfile(
             os.path.join(outdir, names[0].replace('\\', os.sep))))
+        win.close()
+
+    def test_folder_tree_and_filter(self):
+        """7-zip layout: folder tree builds from paths and filters the table."""
+        win = MainWindow()
+        win.open_archive(self.folders_path)
+        self._wait(win)
+        tree = win.folders
+        root = tree.topLevelItem(0)
+        self.assertEqual(root.text(0), "(all files)")
+        top = {root.child(i).text(0) for i in range(root.childCount())}
+        self.assertIn("Scripts/", top)
+        self.assertIn("textures/", top)
+        tex = [root.child(i) for i in range(root.childCount())
+               if root.child(i).text(0) == "textures/"][0]
+        self.assertEqual(tex.child(0).text(0), "ui/")
+
+        total = win.table.rowCount()
+
+        def visible():
+            return [r for r in range(win.table.rowCount())
+                    if not win.table.isRowHidden(r)]
+
+        win.apply_folder_filter("textures")
+        vis = visible()
+        self.assertGreaterEqual(len(vis), 2)
+        for r in vis:
+            e = win.table.entry_at(r)
+            self.assertTrue((e["name"] or "").replace("/", "\\")
+                            .startswith("textures\\"), e["name"])
+        win.apply_folder_filter("textures\\ui")
+        self.assertEqual(len(visible()), 1)
+        win.apply_folder_filter(None)
+        self.assertEqual(len(visible()), total)
         win.close()
 
 

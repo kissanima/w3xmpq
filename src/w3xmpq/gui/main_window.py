@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
     QApplication, QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
     QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMainWindow, QMenu,
     QMessageBox, QPlainTextEdit, QPushButton, QSplitter, QTableWidget,
-    QTableWidgetItem, QVBoxLayout, QWidget)
+    QTableWidgetItem, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
 
 from .. import __version__
 from ..core.w3x_header import is_w3x, parse_header
@@ -114,11 +114,61 @@ class FileTable(QTableWidget):
         return self.entries[row] if 0 <= row < len(self.entries) else None
 
 
+class FolderTree(QTreeWidget):
+    """Left pane: folders of the archive, 7-zip style.
+
+    Each item carries its full folder path (Qt.UserRole). Selecting a
+    folder asks the main window to filter the file table to it; the
+    top-level "(all files)" item clears the filter.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setHeaderHidden(True)
+        self.setMaximumWidth(260)
+        self.itemSelectionChanged.connect(self._emit_selection)
+
+    def _emit_selection(self):
+        items = self.selectedItems()
+        if items:
+            win = self.window()
+            if hasattr(win, "apply_folder_filter"):
+                win.apply_folder_filter(items[0].data(0, Qt.UserRole))
+
+    def load_entries(self, entries):
+        """Rebuild the folder hierarchy from entry names."""
+        self.blockSignals(True)
+        self.clear()
+        root_item = QTreeWidgetItem(["(all files)"])
+        root_item.setData(0, Qt.UserRole, None)
+        self.addTopLevelItem(root_item)
+        nodes = {None: root_item}
+        folders = set()
+        for e in entries:
+            name = e.get("name")
+            if not name:
+                continue
+            parts = re.split(r"[\\/]", name)
+            for i in range(1, len(parts)):
+                folders.add("\\".join(parts[:i]))
+        for f in sorted(folders):
+            parent_path, _, leaf = f.rpartition("\\")
+            parent = nodes.get(parent_path, root_item)
+            item = QTreeWidgetItem([leaf + "/"])
+            item.setData(0, Qt.UserRole, f)
+            parent.addChild(item)
+            nodes[f] = item
+        self.expandAll()
+        self.setCurrentItem(root_item)
+        self.blockSignals(False)
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.current_path = None
         self.current_entries = None
+        self.current_folder = None      # None = all files
         self.worker = None
         self._build_ui()
 
@@ -139,7 +189,9 @@ class MainWindow(QMainWindow):
         self.banner.setTextInteractionFlags(Qt.TextSelectableByMouse)
         self.banner.setWordWrap(True)
 
-        # File table + preview
+        # Folder tree + file table + preview (7-zip layout)
+        self.folders = FolderTree()
+
         self.table = FileTable()
         self.table.itemSelectionChanged.connect(self._preview_selected)
         self.table.cellDoubleClicked.connect(self._focus_preview)
@@ -156,11 +208,13 @@ class MainWindow(QMainWindow):
             "everything else as a hex dump).")
 
         splitter = QSplitter()
+        splitter.addWidget(self.folders)
         splitter.addWidget(self.table)
         splitter.addWidget(self.preview)
-        splitter.setStretchFactor(0, 3)
-        splitter.setStretchFactor(1, 2)
-        splitter.setSizes([650, 450])
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 3)
+        splitter.setStretchFactor(2, 2)
+        splitter.setSizes([180, 470, 450])
 
         central = QWidget()
         layout = QVBoxLayout(central)
@@ -252,7 +306,9 @@ class MainWindow(QMainWindow):
     def _on_scanned(self, entries):
         self.worker = None
         self.current_entries = entries
+        self.current_folder = None
         self.table.load_entries(entries)
+        self.folders.load_entries(entries)
         self.preview.clear()
         self._set_actions_enabled(True)
         self._refresh_banner()
@@ -263,9 +319,38 @@ class MainWindow(QMainWindow):
             % (len(entries), ok, failed, self.current_path))
         # Zip-like feel: show the first recovered file right away.
         for r in range(self.table.rowCount()):
-            if self.table.item(r, 5).text() == "ok":
+            if self.table.item(r, 5).text() == "ok" \
+                    and not self.table.isRowHidden(r):
                 self.table.selectRow(r)
                 break
+
+    # ------------------------------------------------------- folder filter
+    def apply_folder_filter(self, folder):
+        """Show only files under `folder` (None = everything)."""
+        self.current_folder = folder
+        for r, e in enumerate(self.table.entries):
+            name = e.get("name")
+            if folder is None:
+                self.table.setRowHidden(r, False)
+            elif not name:
+                self.table.setRowHidden(r, True)   # unnamed: root only
+            else:
+                self.table.setRowHidden(
+                    r, not name.replace("/", "\\").startswith(
+                        folder + "\\"))
+        # Keep a visible selection so preview/extract stay usable.
+        if self.table.currentRow() < 0 or \
+                self.table.isRowHidden(self.table.currentRow()):
+            self.preview.clear()
+            for r in range(self.table.rowCount()):
+                if not self.table.isRowHidden(r) \
+                        and self.table.item(r, 5).text() == "ok":
+                    self.table.selectRow(r)
+                    break
+        shown = sum(1 for r in range(self.table.rowCount())
+                    if not self.table.isRowHidden(r))
+        label = "(all files)" if folder is None else folder + "\\"
+        self.statusBar().showMessage("%s — %d file(s)" % (label, shown))
 
     def _refresh_banner(self):
         path = self.current_path

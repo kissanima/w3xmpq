@@ -71,8 +71,13 @@ w3xmpq gui map.w3x       # or download w3xmpq-gui.exe from releases
 A professional windowed interface built on Qt/PySide6:
 
 - **Drag & drop** any `.w3x` / `.w3m` / `.mpq` onto the window
-- **File table** — every recovered block with name, sizes, flags and status
-- **Preview pane** — script/text files as text, everything else as a hex dump
+- **Folder tree** (left) — recovered paths shown as a tree; click a folder
+  to filter the file table, like a zip browser
+- **File table** (middle) — every recovered block with name, sizes, flags
+  and status
+- **Preview pane** (right) — script/text files as text, everything else as
+  a hex dump
+- **Right-click** a file → Preview · Extract selected… · Copy name
 - **Map banner** — name, author, tileset, recovery count at a glance
 - **Tools** — deprotection report, safety scan, WorldEdit-ready rebuild,
   two-archive diff, folder batch extraction — all in dialogs, all on

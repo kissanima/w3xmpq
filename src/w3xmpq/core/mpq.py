@@ -222,6 +222,11 @@ class MPQArchive(object):
         for ch in string.upper():
             if not isinstance(ch, int):
                 ch = ord(ch)
+            # MPQ hashes bytes: only the low 8 bits of a character take
+            # part. Masking keeps ASCII behaviour identical and stops
+            # non-ASCII names (e.g. from a map's internal listfile) from
+            # indexing past the encryption table.
+            ch &= 0xFF
             value = self.encryption_table[(hash_types[hash_type] << 8) + ch]
             seed1 = (value ^ (seed1 + seed2)) & 0xFFFFFFFF
             seed2 = ch + seed1 + seed2 + (seed2 << 5) + 3 & 0xFFFFFFFF

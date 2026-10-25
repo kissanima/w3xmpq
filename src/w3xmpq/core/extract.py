@@ -66,6 +66,44 @@ def _probe_known_names(arch, listfile=None):
     return by_block
 
 
+def _apply_internal_listfile(arch, by_block):
+    """Recover real file names from the archive's own '(listfile)'.
+
+    MPQs made by normal tools embed a '(listfile)' block listing every
+    name. Probing those names recovers names that neither the built-in
+    list nor content guessing can find — without it, non-WC3 files show
+    up as 'block_NNN'. Purely additive: blocks already named keep their
+    first (higher-priority) name.
+    """
+    lf_index = None
+    for idx, name in by_block.items():
+        if name == "(listfile)":
+            lf_index = idx
+            break
+    if lf_index is None:
+        return
+    b = arch.block_table[lf_index]
+    if not (b.flags & 0x80000000) or b.archived_size == 0:
+        return
+    try:
+        fd = arch.read_block_data(b)
+        data = extract_block(arch, b, fd, name="(listfile)")
+    except Exception:
+        return
+    if not data:
+        return
+    for line in data.decode("utf-8", "ignore").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            he = arch.get_hash_table_entry(line)
+        except Exception:
+            continue
+        if he is not None:
+            by_block.setdefault(he.block_table_index, line)
+
+
 def scan_archive(path, listfile=None):
     """Decrypt every recoverable file in `path`.
 
@@ -78,6 +116,7 @@ def scan_archive(path, listfile=None):
     """
     arch = open_archive(path)
     by_block = _probe_known_names(arch, listfile=listfile)
+    _apply_internal_listfile(arch, by_block)
     entries = []
     try:
         for i, b in enumerate(arch.block_table):
