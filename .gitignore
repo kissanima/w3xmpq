@@ -11,3 +11,4 @@ w3xmpq_out/
 # python envs
 .venv/
 venv/
+_notes_*.md
