@@ -52,8 +52,11 @@ jobs:
       - name: Rename artifacts
         shell: bash
         run: |
-          mv dist/w3xmpq${{ matrix.ext }} dist/${{ matrix.cli }}
-          mv dist/w3xmpq-gui${{ matrix.ext }} dist/${{ matrix.gui }}
+          # Windows build is already named w3xmpq.exe — skip same-file mv
+          [ "dist/w3xmpq${{ matrix.ext }}" = "dist/${{ matrix.cli }}" ] || \
+            mv dist/w3xmpq${{ matrix.ext }} dist/${{ matrix.cli }}
+          [ "dist/w3xmpq-gui${{ matrix.ext }}" = "dist/${{ matrix.gui }}" ] || \
+            mv dist/w3xmpq-gui${{ matrix.ext }} dist/${{ matrix.gui }}
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.cli }}
