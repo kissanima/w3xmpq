@@ -17,7 +17,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(_HERE, '..', 'src')))
 import gen_synth  # noqa: E402
 
 try:
-    from PySide6.QtCore import QEventLoop, QTimer
+    from PySide6.QtCore import QEventLoop, QTimer, Qt
     from PySide6.QtWidgets import QApplication
     HAVE_QT = True
 except ImportError:
@@ -98,7 +98,7 @@ class TestGuiSmoke(unittest.TestCase):
         self.assertIsNotNone(win.current_entries)
         self.assertGreater(win.table.rowCount(), 0)
         ok_rows = [r for r in range(win.table.rowCount())
-                   if win.table.item(r, 5).text() == "ok"]
+                   if win.table.item(r, 6).text() == "ok"]
         self.assertGreater(len(ok_rows), 0)
         # selecting a row must not crash the preview
         win.table.selectRow(ok_rows[0])
@@ -137,7 +137,7 @@ class TestGuiSmoke(unittest.TestCase):
         win.open_archive(self.map_path)
         self._wait(win)
         ok_rows = [r for r in range(win.table.rowCount())
-                   if win.table.item(r, 5).text() == "ok"]
+                   if win.table.item(r, 6).text() == "ok"]
         win.table.selectRow(ok_rows[0])
         names = win._selected_names()
         self.assertEqual(len(names), 1)
@@ -198,6 +198,66 @@ class TestGuiSmoke(unittest.TestCase):
         self.assertEqual(len(visible()), 1)
         win.apply_folder_filter(None)
         self.assertEqual(len(visible()), total)
+        win.close()
+
+    def test_multi_select_and_live_filter(self):
+        win = MainWindow()
+        win.open_archive(self.folders_path)
+        self._wait(win)
+
+        # Extended selection: several rows can be picked at once.
+        from PySide6.QtCore import QItemSelection, QItemSelectionModel
+        from PySide6.QtWidgets import QTableWidget
+        self.assertEqual(win.table.selectionMode(),
+                         QTableWidget.ExtendedSelection)
+        win.table.clearSelection()
+        model = win.table.selectionModel()
+        for r in (0, 1):
+            model.select(
+                win.table.model().index(r, 0),
+                QItemSelectionModel.Select | QItemSelectionModel.Rows)
+        self.assertGreaterEqual(len(win.table.selected_entries()), 2)
+        self.assertGreaterEqual(len(win._selected_names()), 2)
+
+        # Live text filter narrows the table down.
+        win.filter_edit.setText("tex")
+        visible = [r for r in range(win.table.rowCount())
+                   if not win.table.isRowHidden(r)]
+        self.assertTrue(visible)
+        for r in visible:
+            name = (win.table.entry_at(r)["name"] or "").lower()
+            self.assertIn("tex", name)
+        win.filter_edit.setText("")
+        self.assertFalse(any(win.table.isRowHidden(r)
+                             for r in range(win.table.rowCount())))
+        win.close()
+
+    def test_sorting_keeps_entries_in_sync(self):
+        """Sorting by size must not desynchronise rows from their data."""
+        win = MainWindow()
+        win.open_archive(self.folders_path)
+        self._wait(win)
+        win.table.sortItems(2, Qt.DescendingOrder)   # Size column
+        sizes = [win.table.entry_at(r)["size"]
+                 for r in range(win.table.rowCount())]
+        self.assertEqual(sizes, sorted(sizes, reverse=True))
+        win.table.sortItems(1, Qt.AscendingOrder)    # Name column
+        names = [(win.table.entry_at(r)["name"] or "").lower()
+                 for r in range(win.table.rowCount())]
+        self.assertEqual(names, sorted(names))
+        win.close()
+
+    def test_source_column_reports_recovery_method(self):
+        win = MainWindow()
+        win.open_archive(self.folders_path)
+        self._wait(win)
+        srcs = {win.table.item(r, 5).text() for r in range(win.table.rowCount())}
+        self.assertTrue(srcs)
+        for s in srcs:
+            name_src, _, key_src = s.partition("/")
+            self.assertIn(name_src, ("known", "listfile", "external",
+                                     "guess", "unknown"))
+            self.assertIn(key_src, ("plain", "crack", "named"))
         win.close()
 
 

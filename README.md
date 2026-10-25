@@ -84,11 +84,15 @@ A professional windowed interface built on Qt/PySide6:
 - **Folder tree** (left) — recovered paths shown as a tree; click a folder
   to filter the file table, like a zip browser
 - **File table** (middle) — every recovered block with name, sizes, flags
-  and status
+  and status; **click any column to sort**, ctrl/shift-click for
+  multi-select, and a **live filter box** (Ctrl+F) to narrow 1000+ blocks
+- **Src column** — shows how each file was recovered: `listfile` /
+  `known` / `guess` (name) and `crack` / `named` / `plain` (key)
 - **Preview pane** (right) — script/text files as text, everything else as
   a hex dump
 - **Right-click** a file → Preview · Extract selected… · Copy name
 - **Map banner** — name, author, tileset, recovery count at a glance
+- **Scan progress** with a Cancel button for big maps
 - **Tools** — deprotection report, safety scan, WorldEdit-ready rebuild,
   two-archive diff, folder batch extraction — all in dialogs, all on
   background threads so the UI never freezes

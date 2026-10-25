@@ -78,18 +78,23 @@ def cmd_list(args):
         _die(e)
     rows = [dict(block=e['block'], name=e['name'], size=e['size'],
                  archived=e['archived_size'], flags=_flags_str(e['flags']),
-                 sha256=e['sha256'], status=e['status'])
+                 sha256=e['sha256'], status=e['status'],
+                 name_source=e.get('name_source'),
+                 key_method=e.get('key_method'))
             for e in entries
             if args.failed or e['status'] == 'ok']
     if args.json:
         _print_json(rows)
         return 0
-    print("%-6s %-20s %10s %10s %-5s %s"
-          % ("BLOCK", "NAME", "SIZE", "ARCHIVED", "FLAGS", "SHA256[:12]"))
+    print("%-6s %-20s %10s %10s %-5s %-7s %-7s %s"
+          % ("BLOCK", "NAME", "SIZE", "ARCHIVED", "FLAGS", "NAME-SRC",
+             "KEY", "SHA256[:12]"))
     for r in rows:
-        print("%-6d %-20s %10d %10d %-5s %s"
+        print("%-6d %-20s %10d %10d %-5s %-7s %-7s %s"
               % (r['block'], (r['name'] or "?")[:20], r['size'],
                  r['archived'], r['flags'],
+                 (r['name_source'] or "-")[:7],
+                 (r['key_method'] or "-")[:7],
                  (r['sha256'] or "")[:12]))
     return 0
 

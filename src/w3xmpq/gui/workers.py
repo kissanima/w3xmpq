@@ -14,18 +14,26 @@ from ..core.mpq_write import rebuild_map
 
 
 class ScanWorker(QThread):
-    """scan_archive on a background thread."""
+    """scan_archive on a background thread, with progress + cancel."""
     result_ready = Signal(object)
     failed = Signal(str)
+    progress = Signal(int, int)
 
     def __init__(self, path, listfile=None, parent=None):
         super().__init__(parent)
         self.path = path
         self.listfile = listfile
+        self._cancel = False
+
+    def cancel(self):
+        self._cancel = True
 
     def run(self):
         try:
-            self.result_ready.emit(scan_archive(self.path, self.listfile))
+            self.result_ready.emit(scan_archive(
+                self.path, self.listfile,
+                progress=self.progress.emit,
+                should_stop=lambda: self._cancel))
         except Exception as e:  # noqa: BLE001 - surface to UI
             self.failed.emit(str(e))
 

@@ -16,12 +16,13 @@ import re
 import sys
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QAction, QFont, QKeySequence
+from PySide6.QtGui import QAction, QFont, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication, QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
     QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMainWindow, QMenu,
-    QMessageBox, QPlainTextEdit, QPushButton, QSplitter, QTableWidget,
-    QTableWidgetItem, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
+    QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QSizePolicy,
+    QSplitter, QTableWidget, QTableWidgetItem, QTreeWidget, QTreeWidgetItem,
+    QVBoxLayout, QWidget)
 
 from .. import __version__
 from ..core.w3x_header import is_w3x, parse_header
@@ -39,6 +40,9 @@ TEXT_PREVIEW_LIMIT = 200 * 1024   # bytes shown in the text pane
 
 FLAGS_SHORT = [(0x80000000, "E"), (0x00000200, "Z"), (0x00010000, "K"),
                (0x01000000, "S"), (0x04000000, "C"), (0x00040000, "P")]
+
+SORT_ROLE = Qt.UserRole + 1      # hidden sort key
+ENTRY_ROLE = Qt.UserRole + 2     # index into FileTable.entries
 
 
 def _flags_str(flags):
@@ -69,49 +73,98 @@ def _is_text(name, data):
     return printable / len(sample) > 0.85
 
 
+class SortItem(QTableWidgetItem):
+    """Table item that sorts by a hidden key (case-insensitive for text)."""
+
+    def __lt__(self, other):
+        mine = self.data(SORT_ROLE)
+        theirs = other.data(SORT_ROLE)
+        if isinstance(mine, str) and isinstance(theirs, str):
+            return mine.lower() < theirs.lower()
+        try:
+            return (mine if mine is not None else 0) < \
+                   (theirs if theirs is not None else 0)
+        except TypeError:
+            return str(mine) < str(theirs)
+
+
 class FileTable(QTableWidget):
-    """Table of scanned blocks. Stores entry dicts by row."""
+    """Table of scanned blocks. Stores entry dicts by row.
+
+    Rows keep a reference to their entry in SORT_ROLE/ENTRY_ROLE, so
+    sorting by a column never desynchronises the table from the data.
+    """
 
     def __init__(self, parent=None):
-        super().__init__(0, 6, parent)
+        super().__init__(0, 7, parent)
         self.entries = []
         self._setup()
 
     def _setup(self):
         self.setHorizontalHeaderLabels(
-            ["Block", "Name", "Size", "Packed", "Flags", "Status"])
+            ["Block", "Name", "Size", "Packed", "Flags", "Src", "Status"])
         self.verticalHeader().setVisible(False)
         self.setSelectionBehavior(QTableWidget.SelectRows)
-        self.setSelectionMode(QTableWidget.SingleSelection)
+        # Extended: ctrl/shift-click to pick several files at once.
+        self.setSelectionMode(QTableWidget.ExtendedSelection)
         self.setEditTriggers(QTableWidget.NoEditTriggers)
         self.setAlternatingRowColors(True)
+        self.setSortingEnabled(True)
         header = self.horizontalHeader()
         header.setSectionResizeMode(1, QHeaderView.Stretch)
-        for col in (0, 2, 3, 4, 5):
+        for col in (0, 2, 3, 4, 5, 6):
             header.setSectionResizeMode(col, QHeaderView.ResizeToContents)
+        header.setSortIndicator(2, Qt.DescendingOrder)   # size, biggest first
 
     def load_entries(self, entries):
         self.entries = entries
+        self.setSortingEnabled(False)
         self.setRowCount(len(entries))
         for row, e in enumerate(entries):
+            src = e.get("name_source") or "unknown"
+            key = e.get("key_method") or "plain"
             vals = [str(e["block"]),
                     e["name"] or "<unnamed>",
                     "{:,}".format(e["size"]),
                     "{:,}".format(e["archived_size"]),
                     _flags_str(e["flags"]),
+                    "%s/%s" % (src, key),
                     e["status"]]
+            sort_keys = [e["block"], (e["name"] or "").lower(),
+                         e["size"], e["archived_size"],
+                         _flags_str(e["flags"]), src, e["status"]]
             for col, v in enumerate(vals):
-                item = QTableWidgetItem(v)
-                if col in (0, 2, 3, 4):
+                item = SortItem(v)
+                item.setData(SORT_ROLE, sort_keys[col])
+                item.setData(ENTRY_ROLE, row)
+                if col in (0, 2, 3, 4, 5):
                     item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
                 if e["status"] != "ok":
                     item.setForeground(Qt.red)
                 elif col == 1 and not e["name"]:
                     item.setForeground(Qt.gray)
                 self.setItem(row, col, item)
+        self.setSortingEnabled(True)
 
     def entry_at(self, row):
-        return self.entries[row] if 0 <= row < len(self.entries) else None
+        """Entry dict for a visual row (follows the current sort order)."""
+        item = self.item(row, 0)
+        if item is None:
+            return None
+        idx = item.data(ENTRY_ROLE)
+        if idx is None or not (0 <= idx < len(self.entries)):
+            return None
+        return self.entries[idx]
+
+    def selected_entries(self):
+        """All entries covered by the current selection (multi-select)."""
+        rows = sorted({i.row() for i in self.selectedIndexes()})
+        out = []
+        for r in rows:
+            e = self.entry_at(r)
+            if e is not None:
+                out.append(e)
+        return out
 
 
 class FolderTree(QTreeWidget):
@@ -194,6 +247,21 @@ class MainWindow(QMainWindow):
         # Folder tree + file table + preview (7-zip layout)
         self.folders = FolderTree()
 
+        # Live filter + scan progress row
+        self.filter_edit = QLineEdit()
+        self.filter_edit.setPlaceholderText("filter files… (Ctrl+F)")
+        self.filter_edit.setClearButtonEnabled(True)
+        self.filter_edit.textChanged.connect(self._apply_filters)
+        QShortcut(QKeySequence("Ctrl+F"), self,
+                  activated=self.filter_edit.setFocus)
+
+        self.progress = QProgressBar()
+        self.progress.setMaximumWidth(180)
+        self.progress.setVisible(False)
+        self.cancel_btn = QPushButton("Cancel")
+        self.cancel_btn.setVisible(False)
+        self.cancel_btn.clicked.connect(self._cancel_scan)
+
         self.table = FileTable()
         self.table.itemSelectionChanged.connect(self._preview_selected)
         self.table.cellDoubleClicked.connect(self._focus_preview)
@@ -218,11 +286,25 @@ class MainWindow(QMainWindow):
         splitter.setStretchFactor(2, 2)
         splitter.setSizes([180, 470, 450])
 
+        # Row above the panes: live filter on the left, scan progress on
+        # the right (only visible while a scan runs).
+        top_row = QHBoxLayout()
+        top_row.setSpacing(8)
+        top_row.addWidget(self.filter_edit, 1)
+        top_row.addWidget(self.progress)
+        top_row.addWidget(self.cancel_btn)
+        top_row_widget = QWidget()
+        top_row_widget.setLayout(top_row)
+        # Keep the row compact — it must not absorb the vertical space
+        # that belongs to the file table.
+        top_row_widget.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+
         central = QWidget()
         layout = QVBoxLayout(central)
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(8)
         layout.addWidget(self.banner)
+        layout.addWidget(top_row_widget)
         layout.addWidget(splitter)
         self.setCentralWidget(central)
 
@@ -300,10 +382,26 @@ class MainWindow(QMainWindow):
         self.current_path = path
         self.statusBar().showMessage("Scanning %s…" % os.path.basename(path))
         self.banner.setText("Scanning %s…" % path)
+        self.filter_edit.clear()
+        self.progress.setRange(0, 0)          # busy indicator
+        self.progress.setVisible(True)
+        self.cancel_btn.setVisible(True)
         self.worker = ScanWorker(path)
         self.worker.result_ready.connect(self._on_scanned)
         self.worker.failed.connect(self._on_task_failed)
+        self.worker.progress.connect(self._on_scan_progress)
         self.worker.start()
+
+    def _on_scan_progress(self, done, total):
+        self.progress.setRange(0, max(total, 1))
+        self.progress.setValue(done)
+        self.statusBar().showMessage("Scanning… %d / %d blocks" % (done, total))
+
+    def _cancel_scan(self):
+        if self.worker is not None and hasattr(self.worker, "cancel"):
+            self.worker.cancel()
+            self.statusBar().showMessage("Cancelling…")
+            self.cancel_btn.setEnabled(False)
 
     def _on_scanned(self, entries):
         self.worker = None
@@ -314,6 +412,9 @@ class MainWindow(QMainWindow):
         self.preview.clear()
         self._set_actions_enabled(True)
         self._refresh_banner()
+        self.progress.setVisible(False)
+        self.cancel_btn.setVisible(False)
+        self.cancel_btn.setEnabled(True)
         ok = sum(1 for e in entries if e["status"] == "ok")
         failed = len(entries) - ok
         self.statusBar().showMessage(
@@ -321,7 +422,7 @@ class MainWindow(QMainWindow):
             % (len(entries), ok, failed, self.current_path))
         # Zip-like feel: show the first recovered file right away.
         for r in range(self.table.rowCount()):
-            if self.table.item(r, 5).text() == "ok" \
+            if self.table.item(r, 6).text() == "ok" \
                     and not self.table.isRowHidden(r):
                 self.table.selectRow(r)
                 break
@@ -330,29 +431,40 @@ class MainWindow(QMainWindow):
     def apply_folder_filter(self, folder):
         """Show only files under `folder` (None = everything)."""
         self.current_folder = folder
-        for r, e in enumerate(self.table.entries):
-            name = e.get("name")
-            if folder is None:
-                self.table.setRowHidden(r, False)
-            elif not name:
-                self.table.setRowHidden(r, True)   # unnamed: root only
-            else:
-                self.table.setRowHidden(
-                    r, not name.replace("/", "\\").startswith(
-                        folder + "\\"))
+        self._apply_filters()
+
+    def _apply_filters(self):
+        """Combine the folder selection and the live text filter."""
+        folder = self.current_folder
+        text = self.filter_edit.text().strip().lower()
+        # Iterate *visual* rows — the table may be sorted, so the row index
+        # is not the entry index.
+        for r in range(self.table.rowCount()):
+            e = self.table.entry_at(r)
+            name = (e.get("name") if e else "") or ""
+            visible = True
+            if folder is not None:
+                visible = bool(name) and name.replace(
+                    "/", "\\").startswith(folder + "\\")
+            if visible and text:
+                visible = text in name.lower()
+            self.table.setRowHidden(r, not visible)
         # Keep a visible selection so preview/extract stay usable.
         if self.table.currentRow() < 0 or \
                 self.table.isRowHidden(self.table.currentRow()):
             self.preview.clear()
             for r in range(self.table.rowCount()):
                 if not self.table.isRowHidden(r) \
-                        and self.table.item(r, 5).text() == "ok":
+                        and self.table.item(r, 6).text() == "ok":
                     self.table.selectRow(r)
                     break
         shown = sum(1 for r in range(self.table.rowCount())
                     if not self.table.isRowHidden(r))
         label = "(all files)" if folder is None else folder + "\\"
-        self.statusBar().showMessage("%s — %d file(s)" % (label, shown))
+        if text:
+            label += " matching “%s”" % text
+        self.statusBar().showMessage("%s — %d of %d file(s)"
+                                     % (label, shown, self.table.rowCount()))
 
     def _refresh_banner(self):
         path = self.current_path
@@ -407,11 +519,9 @@ class MainWindow(QMainWindow):
 
     def _selected_names(self):
         """Names of the selected, successfully recovered files."""
-        rows = sorted({i.row() for i in self.table.selectedIndexes()})
         names = []
-        for r in rows:
-            e = self.table.entry_at(r)
-            if e and e["status"] == "ok" and e["name"]:
+        for e in self.table.selected_entries():
+            if e["status"] == "ok" and e["name"]:
                 names.append(e["name"])
         return names
 
@@ -566,6 +676,8 @@ class MainWindow(QMainWindow):
     def _on_task_failed(self, err):
         self.worker = None
         self.current_path = None
+        self.progress.setVisible(False)
+        self.cancel_btn.setVisible(False)
         self.statusBar().showMessage("Ready")
         self.banner.setText("Could not read that file — see the error "
                             "dialog for details.")

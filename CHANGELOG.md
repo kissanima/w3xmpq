@@ -1,5 +1,37 @@
 # Changelog
 
+## 1.1.0 — 2026-10-25
+
+**Browsing core: the table behaves like a real file manager.**
+
+### New
+- **Multi-select** — ctrl/shift-click to pick several files, so
+  "Extract selected…" can now save a whole group at once.
+- **Live filter box** (Ctrl+F) above the file table: type to narrow
+  1297 blocks down to the ones you care about. Combines with the folder
+  tree.
+- **Sortable columns** — click any header (size, name, block, flags…).
+  Rows stay bound to their data while sorting, so selection and
+  extraction never drift.
+- **"Src" column** — shows *how* each file was recovered:
+  `listfile` (name from the archive's own listfile), `known` (built-in
+  WC3 name list), `external` (your `--listfile`), `guess` (content magic),
+  `unknown` — plus the key method: `crack` (recovered from the sector
+  offset table), `named` (named-key fallback), `plain` (not encrypted).
+  The same data is now in `w3xmpq list --json` and the CLI table.
+- **Scan progress + Cancel** — a progress bar counts blocks while a big
+  map is being cracked, and the scan can be aborted.
+
+### Fixed
+- Row filters now follow the sort order (previously the folder filter
+  compared the wrong rows once the table was sorted).
+
+### Verified
+- Real maps unchanged: DotA 1297/1297, MooMoo 557/559, campaign 17/17.
+  Source breakdown on DotA: 1285 files recovered by cracking the key,
+  11 named from the built-in list.
+- 53 tests.
+
 ## 1.0.3 — 2026-10-25
 
 **Screenshots on the repo page + a tighter window.**

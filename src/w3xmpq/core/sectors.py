@@ -115,11 +115,16 @@ def _decode_sector(sec, compress, sparse, expected):
     return cand if len(cand) == expected else None
 
 
-def extract_block(arch, block, fd, name=None):
+def extract_block(arch, block, fd, name=None, info=None):
     """Decrypt + decompress one file block. Returns plaintext bytes or None.
 
     `name` (when known from the hash probe) enables the named-key fallback
     for encrypted files that carry no sector offset table (SINGLE_UNIT).
+
+    `info` (optional dict) is filled in with how the file was recovered:
+      info['key_method'] = 'plain'  (not encrypted)
+                          | 'crack'  (key recovered from the offset table)
+                          | 'named'  (named-key fallback)
     """
     encrypted = bool(block.flags & MPQ_FILE_ENCRYPTED)
     compress = bool(block.flags & MPQ_FILE_COMPRESS)
@@ -129,10 +134,14 @@ def extract_block(arch, block, fd, name=None):
     base = 0
     if encrypted:
         base = recover_base_key(arch, block, fd)
+        if info is not None:
+            info['key_method'] = 'crack' if base is not None else 'named'
         if base is None and name is not None:
             base = recover_named_key(arch, name, block)
         if base is None:
             return None
+    elif info is not None:
+        info['key_method'] = 'plain'
 
     if block.flags & MPQ_FILE_SINGLE_UNIT:
         candidates = (base, (base + 1) & 0xFFFFFFFF) if encrypted else (base,)

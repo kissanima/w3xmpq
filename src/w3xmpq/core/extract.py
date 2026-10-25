@@ -56,17 +56,28 @@ def load_listfile(path):
 
 
 def _probe_known_names(arch, listfile=None):
-    """Hash-probe known names -> block index."""
+    """Hash-probe known names -> block index.
+
+    Returns (by_block, source) where source maps block index to how the
+    name was found: 'known' (built-in WC3 name list), 'external' (supplied
+    by the user via --listfile).
+    """
     by_block = {}
-    names = KNOWN_NAMES + (list(listfile) if listfile else [])
-    for name in names:
+    source = {}
+    for name in KNOWN_NAMES:
         he = arch.get_hash_table_entry(name)
         if he is not None:
             by_block.setdefault(he.block_table_index, name)
-    return by_block
+            source.setdefault(he.block_table_index, "known")
+    for name in (list(listfile) if listfile else []):
+        he = arch.get_hash_table_entry(name)
+        if he is not None:
+            by_block.setdefault(he.block_table_index, name)
+            source.setdefault(he.block_table_index, "external")
+    return by_block, source
 
 
-def _apply_internal_listfile(arch, by_block):
+def _apply_internal_listfile(arch, by_block, source=None):
     """Recover real file names from the archive's own '(listfile)'.
 
     MPQs made by normal tools embed a '(listfile)' block listing every
@@ -102,47 +113,72 @@ def _apply_internal_listfile(arch, by_block):
             continue
         if he is not None:
             by_block.setdefault(he.block_table_index, line)
+            if source is not None:
+                source.setdefault(he.block_table_index, "listfile")
 
 
-def scan_archive(path, listfile=None):
+def scan_archive(path, listfile=None, progress=None, should_stop=None):
     """Decrypt every recoverable file in `path`.
 
     `listfile`: optional list of known filenames — their hashes are probed
     in addition to the built-in WC3 names (useful for non-WC3 archives).
+    `progress`: optional callback invoked as progress(done, total) after
+    every block — used by the GUI to show a progress bar.
+    `should_stop`: optional callback; when it returns True the scan stops
+    early and the entries recovered so far are returned.
     Returns a list of entry dicts:
       block, flags, size, archived_size, status ("ok"/"FAILED"),
-      name, sha256, and `data` (bytes, "ok" entries only).
+      name, name_source, key_method, sha256, and `data` (bytes, "ok"
+      entries only).
     The archive file handle is closed before returning.
     """
     arch = open_archive(path)
-    by_block = _probe_known_names(arch, listfile=listfile)
-    _apply_internal_listfile(arch, by_block)
+    by_block, source = _probe_known_names(arch, listfile=listfile)
+    _apply_internal_listfile(arch, by_block, source)
     entries = []
+    total = len(arch.block_table)
+    done = 0
     try:
         for i, b in enumerate(arch.block_table):
             if not (b.flags & 0x80000000) or b.archived_size == 0:
                 continue
+            if should_stop is not None and should_stop():
+                break
             fd = arch.read_block_data(b)
             probed = by_block.get(i)
-            data = extract_block(arch, b, fd, name=probed)
+            info = {}
+            data = extract_block(arch, b, fd, name=probed, info=info)
             if data is None:
                 entries.append(dict(block=i, name=None, size=0,
                                     archived_size=b.archived_size,
                                     flags=b.flags, status="FAILED",
-                                    sha256=None))
+                                    sha256=None,
+                                    name_source=source.get(i, "unknown"),
+                                    key_method=info.get("key_method")))
                 continue
             if probed is not None:
                 name = probed
+                name_source = source.get(i, "known")
             elif data[:1] == b'\x00':
                 name = "block_%03d" % i
+                name_source = "unknown"
             else:
                 name = guess_name(data, i)
+                name_source = "guess" if name else "unknown"
             name = NAME_REMAP.get(name, name)
             entries.append(dict(block=i, name=name, size=len(data),
                                 archived_size=b.archived_size,
                                 flags=b.flags, status="ok",
                                 sha256=hashlib.sha256(data).hexdigest(),
+                                name_source=name_source,
+                                key_method=info.get("key_method", "plain"),
                                 data=data))
+            done += 1
+            if progress is not None:
+                try:
+                    progress(done, total)
+                except Exception:
+                    pass
     finally:
         arch.file.close()
     return entries
