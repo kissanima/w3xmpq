@@ -43,8 +43,14 @@ jobs:
         # Exclude PySide6: the `gui` subcommand imports it lazily at
         # runtime; without the exclusion PyInstaller bundles Qt into the
         # CLI exe (49 MB instead of ~8 MB).
+        # Exclude PIL/numpy too: `w3xmpq blp ... -o out.png` imports Pillow
+        # lazily and falls back to a clear "install Pillow" message. If a
+        # dev machine happens to have Pillow installed, PyInstaller follows
+        # that import and the CLI exe balloons to ~26 MB — exclude them so
+        # the artifact size does not depend on the runner's packages.
         run: pyinstaller --onefile --name w3xmpq --paths src
-          --exclude-module PySide6 src/w3xmpq/_launch.py
+          --exclude-module PySide6 --exclude-module PIL
+          --exclude-module numpy src/w3xmpq/_launch.py
       - name: Build GUI binary
         run: pyinstaller --onefile --name w3xmpq-gui --paths src src/w3xmpq/_launch_gui.py
       - name: Smoke test binaries
