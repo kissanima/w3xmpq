@@ -72,5 +72,66 @@ class TestDiff(unittest.TestCase):
         self.assertEqual(d['common'], len(SPECS) - 1)
 
 
+class TestNameAwareDiff(unittest.TestCase):
+    """Files that keep their name are paired, so an edit reads as a change
+    rather than as "one file added, one file removed"."""
+
+    def _pair(self):
+        v1 = [dict(name='war3map.j', data=b'function main\nendfunction\n',
+                   flags=gen_synth.F_EXISTS),
+              dict(name='shared.bin', data=b'SAME', flags=gen_synth.F_EXISTS),
+              dict(name='gone.bin', data=b'BYE', flags=gen_synth.F_EXISTS)]
+        v2 = [dict(name='war3map.j',
+                   data=b'function main\n    call DoNothing()\n'
+                        b'endfunction\n',
+                   flags=gen_synth.F_EXISTS),
+              dict(name='shared.bin', data=b'SAME', flags=gen_synth.F_EXISTS),
+              dict(name='new.bin', data=b'HELLO', flags=gen_synth.F_EXISTS)]
+
+        def write(files, name):
+            files = list(files) + [dict(
+                name='(listfile)',
+                data=("\n".join(f['name'] for f in files) + "\n").encode(),
+                flags=gen_synth.F_EXISTS)]
+            return _write(gen_synth.build_archive(files), name)
+
+        return write(v1, 'n1.mpq'), write(v2, 'n2.mpq')
+
+    def test_edited_file_is_reported_as_changed(self):
+        pa, pb = self._pair()
+        d = diff_archives(pa, pb)
+        names = [c['name'] for c in d['changed']]
+        self.assertIn('war3map.j', names)
+        self.assertIn('(listfile)', names)      # its content changed too
+        entry = next(c for c in d['changed'] if c['name'] == 'war3map.j')
+        self.assertGreater(entry['size_b'], entry['size_a'])
+        self.assertNotIn('data', entry['a'], "data must be stripped")
+
+    def test_only_lists_are_name_aware(self):
+        pa, pb = self._pair()
+        d = diff_archives(pa, pb)
+        self.assertEqual([e['name'] for e in d['only_a']], ['gone.bin'])
+        self.assertEqual([e['name'] for e in d['only_b']], ['new.bin'])
+        self.assertEqual([e['name'] for e in d['same_named']],
+                         ['shared.bin'])
+
+    def test_with_data_keeps_the_bytes(self):
+        pa, pb = self._pair()
+        d = diff_archives(pa, pb, with_data=True)
+        entry = next(c for c in d['changed'] if c['name'] == 'war3map.j')
+        self.assertIn(b'DoNothing', entry['b']['data'])
+        self.assertNotIn(b'DoNothing', entry['a']['data'])
+
+    def test_content_lists_keep_their_old_meaning(self):
+        """The CLI counts added/removed by content, not by name."""
+        pa, pb = self._pair()
+        d = diff_archives(pa, pb)
+        # new content: war3map.j, new.bin, and the (listfile) itself
+        self.assertEqual(len(d['added']), 3)
+        # old content: war3map.j, gone.bin, and the (listfile)
+        self.assertEqual(len(d['removed']), 3)
+        self.assertEqual(d['common'], 1)        # shared.bin
+
+
 if __name__ == '__main__':
     unittest.main()

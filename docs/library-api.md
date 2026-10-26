@@ -60,9 +60,22 @@ and name guessing is ambiguous.
 
 ### `w3xmpq.core.diff`
 
-`diff_archives(path_a, path_b)` → dict with `only_a`, `only_b`, `changed`
-(each a list of `(name, sha256)`), plus `common` count. Matching is by
-content hash multiset, so identical files at different positions still match.
+`diff_archives(path_a, path_b, with_data=False)` → dict with:
+
+| key | meaning |
+|---|---|
+| `changed` | `{name, a, b, size_a, size_b}` — same recovered name, different bytes |
+| `only_a` / `only_b` | entries that exist on one side only (by name, or by content when unnamed) |
+| `same_named` | `{name, size, sha256}` — same name, same content |
+| `added` / `removed` | entries only in B / only in A **by content** (SHA-256 multiset) |
+| `common` | number of files with identical content in both |
+| `meta_a` / `meta_b` | path, block count, failure count |
+
+Matching happens twice: files are paired **by recovered name** first, so an
+edited script is one `changed` row instead of one add plus one remove; the
+remaining blocks are matched by content hash multiset, so identical files
+at different positions still match. `with_data=True` keeps the bytes on
+every returned entry (the GUI diff view needs them; the CLI does not).
 
 ### `w3xmpq.core.batch`
 

@@ -110,6 +110,39 @@ def _make_foldered_map(tmp):
     return path
 
 
+def _make_pair(tmp):
+    """Two maps that differ in one file, add one file and drop one."""
+    v1 = [
+        dict(name='war3map.j',
+             data=b'function main takes nothing returns nothing\n'
+                  b'endfunction\n' * 4,
+             flags=gen_synth.F_EXISTS),
+        dict(name='shared.bin', data=b'SAME CONTENT', flags=gen_synth.F_EXISTS),
+        dict(name='removed.bin', data=b'BYE', flags=gen_synth.F_EXISTS),
+    ]
+    v2 = [
+        dict(name='war3map.j',
+             data=b'function main takes nothing returns nothing\n'
+                  b'    call DoNothing()\n'
+                  b'endfunction\n' * 4,
+             flags=gen_synth.F_EXISTS),
+        dict(name='shared.bin', data=b'SAME CONTENT', flags=gen_synth.F_EXISTS),
+        dict(name='added.bin', data=b'HELLO', flags=gen_synth.F_EXISTS),
+    ]
+
+    def write(files, name):
+        files = list(files) + [dict(
+            name='(listfile)',
+            data=("\n".join(f['name'] for f in files) + "\n").encode(),
+            flags=gen_synth.F_EXISTS)]
+        path = os.path.join(tmp, name)
+        with open(path, 'wb') as f:
+            f.write(gen_synth.build_w3x(gen_synth.build_archive(files)))
+        return path
+
+    return write(v1, 'v1.w3x'), write(v2, 'v2.w3x')
+
+
 @unittest.skipUnless(HAVE_QT, "PySide6 not installed")
 class TestGuiSmoke(unittest.TestCase):
     @classmethod
@@ -372,6 +405,8 @@ class TestGuiSmoke(unittest.TestCase):
 
     def test_session_settings_roundtrip(self):
         win = MainWindow()
+        win.open_archive(self.folders_path)
+        self._wait(win)
         win.settings.setValue("last_dir", self._tmp.name)
         win.show_combo.setCurrentText("named only")
         win._save_session()
@@ -498,6 +533,249 @@ class TestGuiPreview(unittest.TestCase):
         win.table.selectRow(0)
         self.assertEqual(win.preview_stack.currentIndex(), 1)
         self.assertFalse(win.image_label.pixmap().isNull())
+        win.close()
+
+
+@unittest.skipUnless(HAVE_QT, "PySide6 not installed")
+class TestTabs(unittest.TestCase):
+    """Each archive lives in its own tab with its own state."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.app = QApplication.instance() or QApplication([])
+        cls._tmp = tempfile.TemporaryDirectory()
+        cls.map_path = _make_map(cls._tmp.name)
+        cls.folders_path = _make_foldered_map(cls._tmp.name)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._tmp.cleanup()
+
+    def _wait_all(self, win, timeout_ms=40000):
+        """Wait until every tab has finished its background task."""
+        loop = QEventLoop()
+        poll = QTimer()
+        poll.setInterval(50)
+        poll.timeout.connect(
+            lambda: all(getattr(w, "worker", None) is None
+                        for w in win._all_views()) and loop.quit())
+        deadline = QTimer()
+        deadline.setSingleShot(True)
+        deadline.timeout.connect(loop.quit)
+        poll.start()
+        deadline.start(timeout_ms)
+        loop.exec()
+        poll.stop()
+        deadline.stop()
+
+    def test_two_archives_get_two_tabs(self):
+        win = MainWindow()
+        win.open_archive(self.map_path)
+        win.open_archive(self.folders_path)
+        self.assertEqual(win.tabs.count(), 2)
+        # The newest tab is current, and the window accessors follow it.
+        self.assertEqual(win.current_path,
+                         os.path.abspath(self.folders_path))
+        self._wait_all(win)
+        self.assertIsNotNone(win.view())
+        self.assertGreater(win.table.rowCount(), 0)
+        win.close()
+
+    def test_tabs_keep_independent_state(self):
+        from w3xmpq.gui.archive_view import ArchiveView
+        win = MainWindow()
+        first = win.open_archive(self.map_path)
+        second = win.open_archive(self.folders_path)
+        self._wait_all(win)
+        self.assertIsInstance(first, ArchiveView)
+        self.assertIsInstance(second, ArchiveView)
+        self.assertIsNot(first, second)
+        self.assertIsNot(first.table, second.table)
+
+        first.filter_edit.setText("tex")
+        self.assertEqual(second.filter_edit.text(), "")
+        self.assertTrue(first.current_entries)
+        self.assertTrue(second.current_entries)
+
+        # Switching tabs re-points the window accessors at the new pane.
+        win.tabs.setCurrentWidget(second)
+        self.assertIs(win.table, second.table)
+        self.assertIs(win.filter_edit, second.filter_edit)
+        self.assertIs(win.banner, second.banner)
+        win.close()
+
+    def test_reopening_the_same_path_focuses_its_tab(self):
+        win = MainWindow()
+        first = win.open_archive(self.map_path)
+        second = win.open_archive(self.map_path)
+        self.assertIs(first, second)
+        self.assertEqual(win.tabs.count(), 1)
+        self._wait_all(win)
+        win.close()
+
+    def test_closing_tabs_returns_to_the_welcome_page(self):
+        win = MainWindow()
+        self.assertEqual(win.stack.currentIndex(), 0)   # welcome page
+        win.open_archive(self.map_path)
+        win.open_archive(self.folders_path)
+        self.assertEqual(win.stack.currentIndex(), 1)
+        self._wait_all(win)
+        win._close_tab(0)
+        self.assertEqual(win.tabs.count(), 1)
+        win._close_tab(0)
+        self.assertEqual(win.tabs.count(), 0)
+        self.assertIsNone(win.view())
+        self.assertEqual(win.stack.currentIndex(), 0)
+        win.close()
+
+    def test_closing_a_tab_mid_scan_is_safe(self):
+        """A scan in flight must not crash when its tab is closed."""
+        win = MainWindow()
+        win.open_archive(self.map_path)
+        win._close_tab(0)          # possibly still scanning
+        self.assertEqual(win.tabs.count(), 0)
+        win.close()
+
+    def test_dark_theme_applies_and_persists(self):
+        from w3xmpq.gui import theme
+        win = MainWindow()
+        win._set_dark(True)
+        self.assertTrue(theme.is_dark())
+        self.assertTrue(win.dark_act.isChecked())
+        self.assertEqual(win.settings.value("theme"), "dark")
+        win._save_session()
+        self.assertEqual(win.settings.value("theme"), "dark")
+        win._set_dark(False)
+        self.assertFalse(theme.is_dark())
+        self.assertEqual(win.settings.value("theme"), "light")
+        win.close()
+
+    def test_theme_survives_a_preview(self):
+        """Switching theme with a file previewed must not lose the file."""
+        win = MainWindow()
+        win.open_archive(self.folders_path)
+        self._wait_all(win)
+        row = next(r for r in range(win.table.rowCount())
+                   if (win.table.entry_at(r)["name"] or "")
+                   .endswith("war3map.j"))
+        win.table.selectRow(row)
+        before = win.preview.toPlainText()
+        win._set_dark(True)
+        self.assertEqual(win.preview.toPlainText(), before)
+        self.assertIsNotNone(win._highlighter)
+        win._set_dark(False)
+        win.close()
+
+
+@unittest.skipUnless(HAVE_QT, "PySide6 not installed")
+class TestDiffView(unittest.TestCase):
+    """The in-app diff: a table of changes plus both versions side by side."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.app = QApplication.instance() or QApplication([])
+        cls._tmp = tempfile.TemporaryDirectory()
+        cls.path_a, cls.path_b = _make_pair(cls._tmp.name)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._tmp.cleanup()
+
+    def _open(self):
+        from w3xmpq.gui.diff_view import DiffView
+        win = MainWindow()
+        view = win.open_diff(self.path_a, self.path_b)
+        self.assertIsInstance(view, DiffView)
+        loop = QEventLoop()
+        poll = QTimer()
+        poll.setInterval(50)
+        poll.timeout.connect(
+            lambda: view.worker is None and loop.quit())
+        poll.start()
+        QTimer.singleShot(40000, loop.quit)
+        loop.exec()
+        poll.stop()
+        return win, view
+
+    def _visible_rows(self, view):
+        return [view._row_at(r) for r in range(view.table.rowCount())
+                if not view.table.isRowHidden(r)]
+
+    def test_changes_are_classified_by_name(self):
+        win, view = self._open()
+        kinds = {r["name"]: r["kind"] for r in view.rows}
+        self.assertEqual(kinds["war3map.j"], "changed")
+        self.assertEqual(kinds["added.bin"], "only_b")
+        self.assertEqual(kinds["removed.bin"], "only_a")
+        self.assertEqual(kinds["shared.bin"], "same")
+        win.close()
+
+    def test_default_filter_hides_identical_files(self):
+        win, view = self._open()
+        rows = self._visible_rows(view)
+        self.assertTrue(rows)
+        self.assertTrue(all(r["kind"] != "same" for r in rows))
+        view.group_combo.setCurrentText("identical files")
+        rows = self._visible_rows(view)
+        self.assertTrue(rows)
+        self.assertTrue(all(r["kind"] == "same" for r in rows))
+        win.close()
+
+    def test_name_filter_narrows_the_table(self):
+        win, view = self._open()
+        view.filter_edit.setText("added")
+        rows = self._visible_rows(view)
+        self.assertEqual([r["name"] for r in rows], ["added.bin"])
+        win.close()
+
+    def test_both_versions_are_shown_side_by_side(self):
+        win, view = self._open()
+        row = next(r for r in range(view.table.rowCount())
+                   if view._row_at(r)["name"] == "war3map.j")
+        view.table.selectRow(row)
+        self.assertIn("endfunction", view.pane_a.toPlainText())
+        self.assertNotIn("DoNothing", view.pane_a.toPlainText())
+        self.assertIn("DoNothing", view.pane_b.toPlainText())
+        # The line counter must report the added call.
+        self.assertIn("+", view.diff_label.text())
+        win.close()
+
+    def test_only_in_a_has_an_empty_right_pane(self):
+        win, view = self._open()
+        row = next(r for r in range(view.table.rowCount())
+                   if view._row_at(r)["kind"] == "only_a")
+        view.table.selectRow(row)
+        self.assertEqual(view.pane_b.toPlainText(), "(not in B)")
+        self.assertNotEqual(view.pane_a.toPlainText(), "")
+        win.close()
+
+    def test_first_difference_marks_the_edit(self):
+        from w3xmpq.gui.diff_view import first_difference
+        self.assertEqual(first_difference("a\nb\nc", "a\nB\nc"), (1, 1))
+        self.assertEqual(first_difference("a\nb", "a\nb\nc"), (2, 2))
+        self.assertIsNone(first_difference("same", "same"))
+        self.assertIsNone(first_difference(None, "a"))
+
+    def test_panes_scroll_to_the_change(self):
+        """The changed line must be on screen, not line 1 of the file."""
+        win, view = self._open()
+        row = next(r for r in range(view.table.rowCount())
+                   if view._row_at(r)["name"] == "war3map.j")
+        view.table.selectRow(row)
+        # The fixture changes the second line ("endfunction" -> call ...).
+        self.assertEqual(view.pane_a.textCursor().blockNumber(), 1)
+        self.assertEqual(view.pane_b.textCursor().blockNumber(), 1)
+        win.close()
+
+    def test_diff_tab_coexists_with_archive_tabs(self):
+        win, view = self._open()
+        archive = win.open_archive(self.path_a)
+        self.assertEqual(win.tabs.count(), 2)
+        self.assertIs(win.view(), archive)
+        win.tabs.setCurrentWidget(view)        # a diff tab is not an archive
+        self.assertIsNone(win.view())
+        win.tabs.setCurrentWidget(archive)
+        self.assertIsNotNone(win.view())
         win.close()
 
 

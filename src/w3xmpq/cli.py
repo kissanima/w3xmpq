@@ -148,15 +148,19 @@ def cmd_diff(args):
     print("A: %s  (%d ok, %d failed)" % (ma['path'], ma['ok'], ma['failed']))
     print("B: %s  (%d ok, %d failed)" % (mb['path'], mb['ok'], mb['failed']))
     print()
-    print("identical content : %d" % result['common'])
-    print("only in B (added) : %d" % len(result['added']))
-    for e in result['added'][:20]:
-        print("   + %-20s %9d bytes  %s" % ((e['name'] or "?")[:20],
-                                            e['size'], e['sha256'][:12]))
-    print("only in A (removed): %d" % len(result['removed']))
-    for e in result['removed'][:20]:
-        print("   - %-20s %9d bytes  %s" % ((e['name'] or "?")[:20],
-                                            e['size'], e['sha256'][:12]))
+    print("identical files : %d" % result['common'])
+    print("changed         : %d" % len(result['changed']))
+    for c in result['changed'][:20]:
+        print("   ~ %-20s %9d -> %9d bytes"
+              % (c['name'][:20], c['size_a'], c['size_b']))
+    print("only in A       : %d" % len(result['only_a']))
+    for e in result['only_a'][:20]:
+        print("   - %-20s %9d bytes  %s"
+              % ((e['name'] or "?")[:20], e['size'], e['sha256'][:12]))
+    print("only in B       : %d" % len(result['only_b']))
+    for e in result['only_b'][:20]:
+        print("   + %-20s %9d bytes  %s"
+              % ((e['name'] or "?")[:20], e['size'], e['sha256'][:12]))
     return 0
 
 

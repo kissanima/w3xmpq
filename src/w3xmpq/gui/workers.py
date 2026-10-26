@@ -62,14 +62,18 @@ class DiffWorker(QThread):
     result_ready = Signal(object)
     failed = Signal(str)
 
-    def __init__(self, path_a, path_b, parent=None):
+    def __init__(self, path_a, path_b, with_data=False, parent=None):
         super().__init__(parent)
         self.path_a = path_a
         self.path_b = path_b
+        # The GUI viewer needs the bytes to show both sides of a change;
+        # the CLI only needs the lists.
+        self.with_data = with_data
 
     def run(self):
         try:
-            self.result_ready.emit(diff_archives(self.path_a, self.path_b))
+            self.result_ready.emit(diff_archives(
+                self.path_a, self.path_b, with_data=self.with_data))
         except Exception as e:
             self.failed.emit(str(e))
 

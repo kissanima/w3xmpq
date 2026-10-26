@@ -31,6 +31,27 @@ or a 7-zip-style GUI.
 
 </details>
 
+<details>
+<summary>Tabs — several archives open at once</summary>
+
+![w3xmpq GUI — tabs](docs/images/gui_tabs.png)
+
+</details>
+
+<details>
+<summary>In-app diff — both versions of a file, side by side</summary>
+
+![w3xmpq GUI — archive diff](docs/images/gui_diff.png)
+
+</details>
+
+<details>
+<summary>Dark theme</summary>
+
+![w3xmpq GUI — dark theme](docs/images/gui_dark.png)
+
+</details>
+
 ```text
 $ w3xmpq report "DotA v6.83dAI PMV 1.42 EN.w3x"
 
@@ -88,7 +109,7 @@ line needs `pip install Pillow` (saving it as `.jpg` does not).
 No-Python binaries (CLI **and** GUI) are on the
 [releases page](https://github.com/kissanima/w3xmpq/releases).
 
-## GUI (v1.0)
+## GUI (v1.4)
 
 ```bash
 w3xmpq gui map.w3x       # or download w3xmpq-gui.exe from releases
@@ -96,6 +117,8 @@ w3xmpq gui map.w3x       # or download w3xmpq-gui.exe from releases
 
 A professional windowed interface built on Qt/PySide6:
 
+- **Tabs** — every archive opens in its own tab (Ctrl+W closes, Ctrl+Tab
+  cycles); drop several maps at once and they all open
 - **Drag & drop** any `.w3x` / `.w3m` / `.mpq` onto the window
 - **Folder tree** (left) — recovered paths shown as a tree; click a folder
   to filter the file table, like a zip browser
@@ -114,9 +137,14 @@ A professional windowed interface built on Qt/PySide6:
 - **Map banner** — name, author, tileset, recovery count at a glance
 - **Scan progress** with a Cancel button for big maps
 - **Find in file** (Ctrl+Shift+F) — search inside a huge script
+- **In-app diff** — compare two maps in a tab: files are paired by name,
+  so an edited script reads as *changed* (not "added" + "removed"), and
+  both versions are shown side by side, scrolled to the first difference
+- **Dark theme** (Ctrl+Shift+D) — a real dark palette, remembered between
+  sessions
 - **Tools** — deprotection report, safety scan, WorldEdit-ready rebuild,
-  two-archive diff, folder batch extraction — all in dialogs, all on
-  background threads so the UI never freezes
+  folder batch extraction — all on background threads so the UI never
+  freezes
 
 ## Quickstart
 

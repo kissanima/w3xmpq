@@ -1,5 +1,60 @@
 # Changelog
 
+## 1.4.0 — 2026-10-26
+
+**Many maps at once, a real diff, and a dark side.**
+
+### New — tabs
+- **Every archive opens in its own tab.** Compare a map with the one you
+  are editing without losing your place, or drop five maps and get five
+  tabs.
+- `Ctrl+W` closes a tab, `Ctrl+Tab` / `Ctrl+Shift+Tab` cycle, and a
+  middle-click closes — like a browser.
+- Opening a path that is already open **focuses its tab** instead of
+  scanning it twice.
+- Each tab keeps its own entries, folder filter, search and preview;
+  closing one tab never disturbs the others.
+- Dropping several files on the window opens them all.
+- An empty window now shows a welcome page instead of a dead toolbar.
+
+### New — in-app diff
+- Comparing two archives opens a **tab**, not a text dialog: a change
+  table (status · name · both sizes · delta · both hashes), a name filter,
+  a group selector (*differences only* / *changed* / *only in A* /
+  *only in B* / *identical*) and the two versions of the selected file
+  **side by side**.
+- The panes **scroll to the first difference** and the header reports
+  `+N −M lines`, so a 4 MB script opens on the line that changed.
+- **Files are now paired by name.** An edited script is reported as
+  *changed*, with both versions, instead of "one file added, one file
+  removed". Unnamed blocks still match by content (SHA-256 multiset).
+- `Tools → Compare current with…` starts from the archive you have open.
+
+### New — dark theme
+- `View → Dark theme` (`Ctrl+Shift+D`), remembered between sessions. The
+  GUI runs on the Fusion style so the palette actually applies on Windows,
+  with a hand-tuned dark palette, dark JASS colours, and table colours
+  that follow the theme.
+- Switching theme keeps the selected file and its preview.
+
+### Changed
+- `w3xmpq diff` prints the same grouping the GUI shows: identical ·
+  changed · only in A · only in B.
+- `core.diff.diff_archives()` gained `changed`, `only_a`, `only_b`,
+  `same_named` and a `with_data` option. `added` / `removed` / `common`
+  keep their content-based meaning, so existing callers are unaffected.
+
+### Fixed
+- The old diff dialog's "Changed" section was always empty — the core
+  never produced changed pairs, only added/removed content.
+- Switching theme rebuilt the file table, which fired a selection change
+  and threw the preview back to the first file.
+
+### Verified
+- 95 tests (was 76): tab independence, closing a tab mid-scan, theme
+  round-trip, diff grouping, filter, side-by-side panes and
+  scroll-to-difference, plus the name-aware core diff.
+
 ## 1.3.0 — 2026-10-26
 
 **Textures, decoded. Scripts, coloured.**

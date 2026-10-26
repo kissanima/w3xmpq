@@ -12,7 +12,7 @@ try:
     from importlib.metadata import version as _version
     __version__ = _version("w3xmpq")
 except Exception:
-    __version__ = "1.3.0"          # source checkout without installation
+    __version__ = "1.4.0"          # source checkout without installation
 
 from .core.mpq import MPQArchive                      # noqa: F401
 from .core.extract import open_archive, extract_archive  # noqa: F401

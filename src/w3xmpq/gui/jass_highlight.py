@@ -197,6 +197,7 @@ class JassHighlighter(QSyntaxHighlighter):
     QTextDocument overload, and the highlighter then never runs.
     """
 
+    #: Light-theme colours: (hex, bold, italic).
     _COLOURS = {
         "keyword": ("#0b5394", True, False),
         "native": ("#7a3e9d", False, False),
@@ -205,6 +206,17 @@ class JassHighlighter(QSyntaxHighlighter):
         "string": ("#b35900", False, False),
         "number": ("#0f7b6c", False, False),
         "preproc": ("#8250df", True, False),
+    }
+
+    #: Dark-theme colours — same hues, lifted for a near-black background.
+    _COLOURS_DARK = {
+        "keyword": ("#7cb7f0", True, False),
+        "native": ("#c99bef", False, False),
+        "call": ("#e0b060", False, False),
+        "comment": ("#7ec699", False, True),
+        "string": ("#f0a35e", False, False),
+        "number": ("#5fd3c0", False, False),
+        "preproc": ("#c4a0ff", True, False),
     }
 
     def highlightBlock(self, text: str):                    # noqa: N802
@@ -216,7 +228,9 @@ class JassHighlighter(QSyntaxHighlighter):
         """Format for a role, built on first use (QApplication exists)."""
         fmt = getattr(self, "_f_" + role, None)
         if fmt is None:
-            color, bold, italic = self._COLOURS[role]
+            from .theme import is_dark
+            table = self._COLOURS_DARK if is_dark() else self._COLOURS
+            color, bold, italic = table[role]
             fmt = QTextCharFormat()
             fmt.setForeground(QColor(color))
             if bold:
