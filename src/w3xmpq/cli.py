@@ -247,6 +247,102 @@ def cmd_blp(args):
     return 0
 
 
+def cmd_objects(args):
+    """Decode a war3map object-data file (w3u/w3t/w3a/w3b/w3d/w3q/w3h)."""
+    from .core.objectdata import (KIND_LABELS, ObjectDataError,
+                                  parse_object_data)
+    try:
+        with open(args.file, "rb") as fh:
+            data = fh.read()
+    except OSError as e:
+        _die(e)
+    try:
+        od = parse_object_data(data, kind=args.kind, name=args.file)
+    except ObjectDataError as e:
+        _die(e)
+
+    info = od.verify()
+    if args.verify:
+        if args.json:
+            _print_json(info)
+        else:
+            print("%s — %s, version %d"
+                  % (args.file, KIND_LABELS[od.kind], od.version))
+            print("  original objects : %d" % info["original_objects"])
+            print("  custom objects   : %d" % info["custom_objects"])
+            print("  modifications    : %d" % info["modifications"])
+            print("  trailing bytes   : %d" % info["trailing_bytes"])
+            print("  complete         : %s" % ("yes" if info["complete"] else "NO"))
+        return 0 if info["complete"] else 1
+
+    objects = od.find(args.id) if args.id else od.objects
+    if args.limit:
+        objects = objects[:args.limit]
+
+    names = {}
+    if args.metadata:
+        from .core.slk import SlkError, load_field_names, load_westrings
+        try:
+            strings = load_westrings(
+                os.path.join(args.metadata, "UI", "WorldEditStrings.txt"))
+            names = load_field_names(args.metadata, od.kind, strings=strings)
+        except SlkError as e:
+            _die(e)
+        if not names:
+            print("warning: no field names found under %s" % args.metadata,
+                  file=sys.stderr)
+
+    if args.json:
+        if names:
+            for obj in objects:
+                for mod in obj["mods"]:
+                    mod["field"] = names.get(mod["id"])
+        _print_json(dict(info, objects=objects))
+        return 0
+
+    print("%s — %s, version %d" % (args.file, KIND_LABELS[od.kind], od.version))
+    print("%d original + %d custom object(s), %d modification(s)"
+          % (info["original_objects"], info["custom_objects"],
+             info["modifications"]))
+    if not info["complete"]:
+        print("warning: %d trailing byte(s) were not consumed"
+              % info["trailing_bytes"])
+    for obj in objects:
+        label = obj["original_id"]
+        if obj["custom_id"]:
+            label = "%s -> %s" % (label, obj["custom_id"])
+        print()
+        print("%s  (%d modification%s)"
+              % (label, len(obj["mods"]), "" if len(obj["mods"]) == 1 else "s"))
+        for mod in obj["mods"]:
+            prefix = ""
+            if mod["level"] is not None:
+                prefix = "lvl %-2d " % mod["level"]
+                if mod["column"]:
+                    prefix += "col %-2d " % mod["column"]
+            name = names.get(mod["id"], "")
+            if len(name) > 36:
+                name = name[:35] + "\u2026"
+            print("   %-4s %-36s %-6s %s= %s"
+                  % (mod["id"], name, mod["type"], prefix,
+                     _fmt_value(mod["value"])))
+    if not objects:
+        print("no object matched %r" % args.id)
+        return 1
+    return 0
+
+
+def _fmt_value(value):
+    if isinstance(value, str):
+        text = value.replace("\r", "\\r").replace("\n", "\\n")
+        if len(text) > 96:
+            text = text[:93] + "..."
+        return '"%s"' % text
+    if isinstance(value, float):
+        return ("%.6g" % value)
+    return str(value)
+
+
 def _jpeg_to_png(jpeg_bytes, level=0):
     """Convert a JPEG stream to PNG (needs Pillow)."""
     try:
@@ -348,6 +444,26 @@ def build_parser():
     pg.add_argument("archive", nargs="?", help="archive to open on start")
     pg.set_defaults(func=cmd_gui)
 
+    pobj = sub.add_parser(
+        "objects",
+        help="decode a war3map object-data file (w3u/w3t/w3a/w3b/w3d/w3q/w3h)")
+    pobj.add_argument("file", help="an extracted war3map.w3a / .w3u / ...")
+    pobj.add_argument("--kind", choices=sorted(("w3u", "w3t", "w3a", "w3b",
+                                               "w3d", "w3q", "w3h")),
+                      help="override the kind inferred from the file name")
+    pobj.add_argument("--id", help="only show objects with this fourcc id")
+    pobj.add_argument("--limit", type=int, default=0,
+                      help="stop after N objects (0 = all)")
+    pobj.add_argument("--json", action="store_true", help="machine output")
+    pobj.add_argument("--metadata", metavar="DIR",
+                      help="folder holding Units/ and Doodads/ metadata .slk "
+                           "files (extracted from War3x.mpq); resolves field "
+                           "ids to English names")
+    pobj.add_argument("--verify", action="store_true",
+                      help="only report counts and whether the file parsed "
+                           "completely")
+    pobj.set_defaults(func=cmd_objects)
+
     return ap
 
 
@@ -378,6 +494,7 @@ def _no_args_welcome():
     print('  w3xmpq report "C:\\path\\to\\map.w3x"          # how is it locked?')
     print('  w3xmpq scan   "C:\\path\\to\\map.w3x"          # safety scan')
     print('  w3xmpq diff   old.w3x new.w3x               # compare versions')
+    print('  w3xmpq objects war3map.w3a                 # decode ability data')
     print('  w3xmpq batch  "C:\\path\\to\\maps\\" -o out/     # bulk extraction')
     print('  w3xmpq gui    "C:\\path\\to\\map.w3x"          # graphical UI')
     print()

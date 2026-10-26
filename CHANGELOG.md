@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+### New — object data
+- **`w3xmpq objects`** decodes the map's object-data files — `war3map.w3u`
+  (units), `.w3t` (items), `.w3a` (abilities), `.w3b` (destructables),
+  `.w3d` (doodads), `.w3q` (upgrades), `.w3h` (buffs) — into readable
+  records instead of opaque bytes.
+- Field ids are translated to English using the game's own metadata:
+  pass `--metadata <dir>` with `Units/` + `Doodads/` extracted from
+  `War3x.mpq` and `aran` becomes *Cast Range*, `Ocl1` becomes *Damage per
+  Target*. All 183 fields used by DotA 6.83d resolve.
+- `--verify` reports object counts and whether the file parsed **completely**;
+  `--id` selects one object, `--json` emits machine output.
+- Correct handling of the format's main trap: the `level`/`column` pair is
+  present for doodads, abilities and upgrades but **absent** for units,
+  items, destructables and buffs. Assuming one layout desynchronises the
+  stream without raising an error.
+- New `core/slk.py` reads the SYLK-style `.slk` tables and
+  `UI/WorldEditStrings.txt`, so field metadata and display strings are
+  available to any other feature.
+
 ## 1.4.0 — 2026-10-26
 
 **Many maps at once, a real diff, and a dark side.**

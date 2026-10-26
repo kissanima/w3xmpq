@@ -159,6 +159,7 @@ w3xmpq diff   old.w3x new.w3x            # version comparison
 w3xmpq batch  ./maps/ -o out/            # bulk processing
 w3xmpq rebuild map.w3x -o fixed.w3x      # WorldEdit-ready copy
 w3xmpq blp    texture.blp -o out.png     # decode a Warcraft III texture
+w3xmpq objects war3map.w3a               # decode ability/unit/item overrides
 ```
 
 All commands accept `--json` for machine-readable output. Exit codes:

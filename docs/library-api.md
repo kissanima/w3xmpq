@@ -118,6 +118,56 @@ modifies the original map.
 Beta: validated against synthetic streams and length checks; full
 fuzzing against real Diablo/StarCraft archives is on the roadmap.
 
+### `w3xmpq.core.objectdata` — map object data
+
+Decodes the map's overrides on top of the base SLK tables.
+
+| Function | Returns | Notes |
+|---|---|---|
+| `parse_object_data(data, kind=None, name=None)` | `ObjectData` | `kind` is `w3u`/`w3t`/`w3a`/`w3b`/`w3d`/`w3q`/`w3h`; inferred from `name` when omitted (`war3map.w3a`, `war3mapSkin.w3u`, …). Raises `ObjectDataError` on anything it cannot decode completely. |
+
+`ObjectData` attributes:
+
+| Attribute | Meaning |
+|---|---|
+| `kind`, `version` | detected file kind and format version (1 or 2) |
+| `original`, `custom` | lists of `{original_id, custom_id, mods}` |
+| `objects` | `original + custom` |
+| `modification_count` | total modifications across all objects |
+| `trailing`, `complete` | bytes left unread; `complete` is `True` when `trailing == 0` |
+| `verify()` | dict of counts + `complete`, suitable for `--json` |
+| `find(object_id)` | objects whose original **or** custom id matches |
+
+Each modification is `{id, type, level, column, value, object_id}` where `type`
+is `"int"`/`"real"`/`"unreal"`/`"string"`, and `level`/`column` are `None` for
+units, items, destructables and buffs (the format omits them for those kinds —
+assuming one layout for every kind desynchronises the stream).
+
+```python
+from w3xmpq.core.objectdata import parse_object_data
+
+od = parse_object_data(open("war3map.w3a", "rb").read(), name="war3map.w3a")
+print(od.verify())                 # counts + complete
+for mod in od.find("A04U")[0]["mods"]:
+    print(mod["id"], mod["level"], mod["value"])
+```
+
+### `w3xmpq.core.slk` — SLK tables and editor strings
+
+| Function | Returns | Notes |
+|---|---|---|
+| `read_slk(path)` | `list[dict]` | SYLK-style `.slk` (the game's data tables) as rows keyed by the header row. Raises `SlkError`. |
+| `load_westrings(path)` | `dict[str, str]` | `UI/WorldEditStrings.txt` → `WESTRING_*` text. |
+| `load_field_names(slk_root, kind, strings=None)` | `dict[str, str]` | modification id → English label for one object-data kind, using `METADATA_FILES`. |
+
+`METADATA_FILES` maps each kind to the metadata table that names its fields.
+Extract the inputs from `War3x.mpq` first:
+
+```bash
+w3xmpq extract War3x.mpq -o slk/ -f "MetaData"
+w3xmpq extract War3x.mpq -o slk/ -f "WorldEditStrings"
+```
+
 ## Error handling
 
 - `scan_archive` / `extract_archive` never raise on individual bad blocks —
