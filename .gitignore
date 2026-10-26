@@ -4,6 +4,7 @@ __pycache__/
 *.egg-info/
 build/
 dist/
+*.spec
 .eggs/
 # verification outputs (extracted copyrighted map data must never be committed)
 _verify/
