@@ -19,6 +19,19 @@ Three families exist in the wild:
     to stitch the two halves back together before handing the result
     to a JPEG decoder.
 
+    .. warning::
+       **The four components are stored in the order Y, M, C, K — not
+       the CMYK order a JPEG decoder assumes.**  A standard decoder
+       reads them as C, M, Y, K and therefore swaps cyan and yellow.
+       For most images the result is merely a slightly wrong colour; for
+       the engine's ``ReplaceableTextures\\TeamColor\\TeamColorNN.blp``
+       swatches it is catastrophic: ``TeamColor00`` (the *red* player
+       colour) decodes as pure blue, and the whole 24-colour palette
+       comes out as a different — but entirely plausible-looking — set
+       of colours.  Measured against the engine's own
+       ``PLAYER_COLOR_*`` names, swapping C and Y before the
+       CMYK→RGB conversion reproduces all 24 entries exactly.
+
 Everything in this module is pure Python and dependency free.  For the
 JPEG variant the module does *not* decode pixels itself; it returns a
 valid JPEG stream (:meth:`Blp.jpeg_bytes`) which any JPEG decoder can
@@ -325,6 +338,10 @@ class Blp:
         closes the shared header block, the frame length and body
         start every mipmap.  Stitching them back together yields a
         stream that any standard JPEG decoder accepts.
+
+        Note the component-order warning in the module docstring: the
+        returned stream carries its four channels in Y, M, C, K order,
+        so a decoder that assumes C, M, Y, K will swap cyan and yellow.
         """
         if not self.jpeg:
             raise BlpError("this BLP does not contain a JPEG")
