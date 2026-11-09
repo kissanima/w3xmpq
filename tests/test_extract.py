@@ -73,6 +73,50 @@ class TestExtractEndToEnd(unittest.TestCase):
             with open(path, 'rb') as f:
                 self.assertEqual(f.read(), raw)
 
+    def test_progress_reports_a_real_total(self):
+        """The task bar needs (done, total), not an indeterminate 0 total."""
+        events = []
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, 'synth.mpq')
+            with open(path, 'wb') as f:
+                f.write(gen_synth.build_archive(SPECS))
+            manifest = extract_archive(
+                path, os.path.join(tmp, 'out'), verbose=False,
+                progress=lambda done, total: events.append((done, total)))
+        self.assertTrue(events)
+        self.assertTrue(all(total > 0 for _done, total in events))
+        self.assertEqual(len({total for _done, total in events}), 1)
+        self.assertGreater(events[-1][0], 0)
+        self.assertEqual(len([m for m in manifest if m.get('extracted')]),
+                         len(SPECS))
+
+    def test_blocks_limit_extraction(self):
+        """Selecting by MPQ block works even for nameless entries."""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, 'synth.mpq')
+            with open(path, 'wb') as f:
+                f.write(gen_synth.build_archive(SPECS))
+            full = extract_archive(path, os.path.join(tmp, 'full'),
+                                   verbose=False)
+            block = next(m['block'] for m in full if m.get('extracted'))
+            out = os.path.join(tmp, 'out')
+            manifest = extract_archive(path, out, verbose=False,
+                                       blocks=[block])
+            written = [m for m in manifest if m.get('extracted')]
+            self.assertEqual([m['block'] for m in written], [block])
+            self.assertTrue(os.path.isfile(os.path.join(
+                out, written[0]['name'].replace('\\', os.sep))))
+
+    def test_should_stop_cancels_extraction(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, 'synth.mpq')
+            with open(path, 'wb') as f:
+                f.write(gen_synth.build_archive(SPECS))
+            manifest = extract_archive(path, os.path.join(tmp, 'out'),
+                                       verbose=False,
+                                       should_stop=lambda: True)
+            self.assertEqual(manifest, [])
+
 
 if __name__ == '__main__':
     unittest.main()

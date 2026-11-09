@@ -27,11 +27,12 @@ def find_archives(root):
     return sorted(found)
 
 
-def batch_extract(root, outdir, pattern=None):
+def batch_extract(root, outdir, pattern=None, progress=None):
     """Extract every archive under `root` into `outdir`.
 
     Returns the index records (also written as index.csv/index.json
-    inside `outdir`).
+    inside `outdir`).  `progress`, when given, is called as
+    ``progress(done, total)`` after each archive.
     """
     rx = re.compile(pattern) if pattern else None
     paths = find_archives(root)
@@ -65,6 +66,11 @@ def batch_extract(root, outdir, pattern=None):
         index.append(rec)
         print("[%d/%d] %-14s %s" % (n, len(paths), rec['status'],
                                     os.path.basename(path)))
+        if progress is not None:
+            try:
+                progress(n, len(paths))
+            except Exception:
+                pass
 
     with open(os.path.join(outdir, 'index.csv'), 'w', newline='',
               encoding='utf-8') as f:

@@ -73,9 +73,14 @@ def sniff(data):
     return None
 
 
-def build_report(path):
-    """Build the deprotection report for a map/archive. Returns a dict."""
-    entries = scan_archive(path)
+def build_report(path, entries=None):
+    """Build the deprotection report for a map/archive. Returns a dict.
+
+    `entries` lets a caller (the GUI) reuse a scan it already performed;
+    when omitted the archive is scanned here.
+    """
+    if entries is None:
+        entries = scan_archive(path)
     by_name = {}
     for e in entries:
         if e['name']:

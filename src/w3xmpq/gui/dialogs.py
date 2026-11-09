@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
-"""Small dialogs and the generic worker used by the GUI.
+"""Small dialogs and helpers kept apart from the window modules.
 
-Kept apart from the window modules so that neither the archive pane nor
-the tab host has to import the other.
+The redesigned UI no longer uses modal text dumps for Report/Safety and no
+longer needs a two-field compare picker, but these widgets are still
+useful from the CLI/embedding side and are kept for compatibility.
 """
 
 import os
@@ -13,23 +14,9 @@ from PySide6.QtWidgets import (QDialog, QDialogButtonBox, QFileDialog,
                                QPlainTextEdit, QPushButton, QVBoxLayout,
                                QWidget)
 
-from .workers import ScanWorker
+from .workers import FnWorker                            # noqa: F401
 
 ARCHIVE_FILTER = "WC3 maps & MPQ archives (*.w3x *.w3m *.mpq);;All files (*)"
-
-
-class FnWorker(ScanWorker):
-    """Runs an arbitrary core function that takes (path) and returns a dict."""
-
-    def __init__(self, fn, path, parent=None):
-        super().__init__(path, parent=parent)
-        self._fn = fn
-
-    def run(self):
-        try:
-            self.result_ready.emit(self._fn(self.path))
-        except Exception as e:                          # noqa: BLE001
-            self.failed.emit(str(e))
 
 
 class TextDialog(QDialog):

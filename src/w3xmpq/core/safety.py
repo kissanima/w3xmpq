@@ -60,9 +60,14 @@ STAT_NATIVES = [
 ]
 
 
-def scan_safety(path):
-    """Scan the recovered script of a map. Returns a dict."""
-    entries = scan_archive(path)
+def scan_safety(path, entries=None):
+    """Scan the recovered script of a map. Returns a dict.
+
+    `entries` lets a caller reuse an existing scan (the GUI does this so
+    opening a map decrypts it exactly once).
+    """
+    if entries is None:
+        entries = scan_archive(path)
     scripts = [e for e in entries
                if e['status'] == 'ok' and e['name'] in SCRIPT_NAMES]
     scripts.sort(key=lambda e: -e['size'])

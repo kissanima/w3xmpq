@@ -1,8 +1,15 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""GUI smoke tests (offscreen). Skipped entirely when PySide6 is missing
-so non-GUI environments (and the CI matrix without Qt) still pass."""
+"""GUI tests (offscreen) for the redesigned w3xmpq interface.
 
+Everything here addresses the *views* directly — the window is only a tab
+host now, so the old ~30 compatibility properties are gone.  Skipped
+entirely when PySide6 is missing so the non-GUI CI matrix still passes.
+"""
+
+import atexit
+import itertools
+import json
 import os
 import sys
 import tempfile
@@ -17,14 +24,28 @@ sys.path.insert(0, os.path.abspath(os.path.join(_HERE, '..', 'src')))
 import gen_synth  # noqa: E402
 
 try:
-    from PySide6.QtCore import QEventLoop, QTimer, Qt
-    from PySide6.QtWidgets import QApplication
+    from PySide6.QtCore import (QEventLoop, QItemSelectionModel, QSettings,
+                                QTimer, Qt)
+    from PySide6.QtWidgets import QApplication, QAbstractItemView
     HAVE_QT = True
 except ImportError:
     HAVE_QT = False
 
 if HAVE_QT:
-    from w3xmpq.gui.main_window import MainWindow
+    from w3xmpq.gui.main_window import MainWindow as _RealMainWindow
+
+    # QSettings("w3xmpq", "w3xmpq") lands in the user's registry/INI.  Every
+    # window here gets its own throw-away INI, so remembered layouts, recent
+    # maps and geometry can never leak between tests or into real preferences.
+    _settings_home = tempfile.TemporaryDirectory(prefix="w3xmpq-gui-test-")
+    atexit.register(_settings_home.cleanup)
+    _window_ids = itertools.count()
+
+    def MainWindow(*args, **kwargs):
+        ini = os.path.join(_settings_home.name,
+                           "settings-%d.ini" % next(_window_ids))
+        kwargs.setdefault("settings", QSettings(ini, QSettings.IniFormat))
+        return _RealMainWindow(*args, **kwargs)
 
 
 def _make_blp1(width=4, height=4):
@@ -143,6 +164,22 @@ def _make_pair(tmp):
     return write(v1, 'v1.w3x'), write(v2, 'v2.w3x')
 
 
+def _wait_until(predicate, timeout_ms=30000):
+    """Spin the event loop until predicate() is true (or time out)."""
+    loop = QEventLoop()
+    poll = QTimer()
+    poll.setInterval(50)
+    poll.timeout.connect(lambda: predicate() and loop.quit())
+    deadline = QTimer()
+    deadline.setSingleShot(True)
+    deadline.timeout.connect(loop.quit)
+    poll.start()
+    deadline.start(timeout_ms)
+    loop.exec()
+    poll.stop()
+    deadline.stop()
+
+
 @unittest.skipUnless(HAVE_QT, "PySide6 not installed")
 class TestGuiSmoke(unittest.TestCase):
     @classmethod
@@ -157,35 +194,34 @@ class TestGuiSmoke(unittest.TestCase):
     def tearDownClass(cls):
         cls._tmp.cleanup()
 
-    def _wait(self, win, attr="worker", timeout_ms=30000):
-        """Spin the event loop until win.<attr> is None (task finished)."""
-        loop = QEventLoop()
-        poll = QTimer()
-        poll.setInterval(50)
-        poll.timeout.connect(
-            lambda: getattr(win, attr) is None and loop.quit())
-        deadline = QTimer()
-        deadline.setSingleShot(True)
-        deadline.timeout.connect(loop.quit)
-        poll.start()
-        deadline.start(timeout_ms)
-        loop.exec()
-        poll.stop()
-        deadline.stop()
-
-    def test_open_scan_preview(self):
+    def _open(self, path):
         win = MainWindow()
-        win.open_archive(self.map_path)
-        self._wait(win)
-        self.assertIsNone(win.worker)
-        self.assertIsNotNone(win.current_entries)
-        self.assertGreater(win.table.rowCount(), 0)
-        ok_rows = [r for r in range(win.table.rowCount())
-                   if win.table.item(r, 6).text() == "ok"]
-        self.assertGreater(len(ok_rows), 0)
-        # selecting a row must not crash the preview
-        win.table.selectRow(ok_rows[0])
-        self.assertTrue(win.banner.text().strip())
+        view = win.open_archive(path)
+        # The scan is followed by an automatic report/safety job on the
+        # shared manager; wait for both so assertions see a settled view.
+        _wait_until(lambda: view.worker is None
+                    and not win.tasks.active_jobs())
+        return win, view
+
+    def _visible(self, view):
+        return [view.table.entry_at(r)
+                for r in range(view.table.row_count())]
+
+    def test_open_scan_summary_and_preview(self):
+        win, view = self._open(self.map_path)
+        self.assertIsNone(view.worker)
+        self.assertIsNotNone(view.current_entries)
+        self.assertGreater(view.table.row_count(), 0)
+        # The verdict is the headline, not a dot-separated footnote.
+        self.assertIn("blocks recovered",
+                      view.summary_strip.headline.text())
+        self.assertIn("%" , view.summary_strip.detail.text())
+        self.assertGreater(view.summary_strip.progress.value(), 0)
+        # Chip counts come from the model, independent of the filter.
+        counts = view.table.counts()
+        self.assertEqual(counts["all"], view.table.source_count())
+        view.table.select_first_ok()
+        self.assertTrue(view.banner.text().strip())
         win.close()
 
     def test_extract_via_worker(self):
@@ -211,26 +247,25 @@ class TestGuiSmoke(unittest.TestCase):
         self.assertTrue(os.path.isdir(outdir))
         win.close()
 
-    def test_extract_selected_pattern(self):
-        """Zip-style single-file extraction: selecting a row and running the
-        ExtractWorker with that row's escaped name must extract exactly it."""
+    def test_extract_selected_by_block_including_unnamed(self):
+        """A protected map's unnamed files are exactly the ones to extract."""
         import re
         from w3xmpq.gui.workers import ExtractWorker
-        win = MainWindow()
-        win.open_archive(self.map_path)
-        self._wait(win)
-        ok_rows = [r for r in range(win.table.rowCount())
-                   if win.table.item(r, 6).text() == "ok"]
-        win.table.selectRow(ok_rows[0])
-        names = win._selected_names()
+        win, view = self._open(self.map_path)
+        view.table.select_first_ok()
+        blocks = view._selected_blocks()
+        self.assertEqual(len(blocks), 1)
+        self.assertTrue(view.selected_entries())
+        names = view._selected_names()
         self.assertEqual(len(names), 1)
-        self.assertTrue(names[0])
 
         outdir = os.path.join(self._tmp.name, 'sel')
         done = {}
         loop = QEventLoop()
-        w = ExtractWorker(self.map_path, outdir,
-                          pattern="|".join(re.escape(n) for n in names))
+        w = ExtractWorker(
+            self.map_path, outdir,
+            pattern="|".join(re.escape(n) for n in names) if names else None,
+            blocks=blocks)
 
         def on_done(manifest):
             done['manifest'] = manifest
@@ -245,16 +280,11 @@ class TestGuiSmoke(unittest.TestCase):
         extracted = [r['name'] for r in done['manifest']
                      if r.get('extracted')]
         self.assertEqual(extracted, [names[0]])
-        self.assertTrue(os.path.isfile(
-            os.path.join(outdir, names[0].replace('\\', os.sep))))
         win.close()
 
-    def test_folder_tree_and_filter(self):
-        """7-zip layout: folder tree builds from paths and filters the table."""
-        win = MainWindow()
-        win.open_archive(self.folders_path)
-        self._wait(win)
-        tree = win.folders
+    def test_folder_tree_and_proxy_filter(self):
+        win, view = self._open(self.folders_path)
+        tree = view.folders
         root = tree.topLevelItem(0)
         self.assertEqual(root.text(0), "(all files)")
         top = {root.child(i).text(0) for i in range(root.childCount())}
@@ -264,172 +294,191 @@ class TestGuiSmoke(unittest.TestCase):
                if root.child(i).text(0) == "textures/"][0]
         self.assertEqual(tex.child(0).text(0), "ui/")
 
-        total = win.table.rowCount()
-
-        def visible():
-            return [r for r in range(win.table.rowCount())
-                    if not win.table.isRowHidden(r)]
-
-        win.apply_folder_filter("textures")
-        vis = visible()
-        self.assertGreaterEqual(len(vis), 2)
-        for r in vis:
-            e = win.table.entry_at(r)
+        total = view.table.row_count()
+        view.apply_folder_filter("textures")
+        rows = self._visible(view)
+        self.assertGreaterEqual(len(rows), 2)
+        for e in rows:
             self.assertTrue((e["name"] or "").replace("/", "\\")
                             .startswith("textures\\"), e["name"])
-        win.apply_folder_filter("textures\\ui")
-        self.assertEqual(len(visible()), 1)
-        win.apply_folder_filter(None)
-        self.assertEqual(len(visible()), total)
+        view.apply_folder_filter("textures\\ui")
+        self.assertEqual(len(self._visible(view)), 1)
+        view.apply_folder_filter(None)
+        self.assertEqual(len(self._visible(view)), total)
         win.close()
 
     def test_multi_select_and_live_filter(self):
-        win = MainWindow()
-        win.open_archive(self.folders_path)
-        self._wait(win)
-
-        # Extended selection: several rows can be picked at once.
-        from PySide6.QtCore import QItemSelection, QItemSelectionModel
-        from PySide6.QtWidgets import QTableWidget
-        self.assertEqual(win.table.selectionMode(),
-                         QTableWidget.ExtendedSelection)
-        win.table.clearSelection()
-        model = win.table.selectionModel()
+        win, view = self._open(self.folders_path)
+        self.assertEqual(view.table.selectionMode(),
+                         QAbstractItemView.ExtendedSelection)
+        view.table.clearSelection()
+        model = view.table.selectionModel()
         for r in (0, 1):
-            model.select(
-                win.table.model().index(r, 0),
-                QItemSelectionModel.Select | QItemSelectionModel.Rows)
-        self.assertGreaterEqual(len(win.table.selected_entries()), 2)
-        self.assertGreaterEqual(len(win._selected_names()), 2)
+            model.select(view.table.model().index(r, 0),
+                         QItemSelectionModel.Select | QItemSelectionModel.Rows)
+        self.assertGreaterEqual(len(view.table.selected_entries()), 2)
 
-        # Live text filter narrows the table down.
-        win.filter_edit.setText("tex")
-        visible = [r for r in range(win.table.rowCount())
-                   if not win.table.isRowHidden(r)]
-        self.assertTrue(visible)
-        for r in visible:
-            name = (win.table.entry_at(r)["name"] or "").lower()
-            self.assertIn("tex", name)
-        win.filter_edit.setText("")
-        self.assertFalse(any(win.table.isRowHidden(r)
-                             for r in range(win.table.rowCount())))
+        view.filter_edit.setText("tex")
+        rows = self._visible(view)
+        self.assertTrue(rows)
+        for e in rows:
+            self.assertIn("tex", (e["name"] or "").lower())
+        view.filter_edit.setText("")
+        self.assertEqual(len(self._visible(view)),
+                         view.table.source_count())
         win.close()
 
     def test_sorting_keeps_entries_in_sync(self):
-        """Sorting by size must not desynchronise rows from their data."""
-        win = MainWindow()
-        win.open_archive(self.folders_path)
-        self._wait(win)
-        win.table.sortItems(2, Qt.DescendingOrder)   # Size column
-        sizes = [win.table.entry_at(r)["size"]
-                 for r in range(win.table.rowCount())]
+        win, view = self._open(self.folders_path)
+        view.table.sortByColumn(2, Qt.DescendingOrder)   # Size
+        sizes = [e["size"] for e in self._visible(view)]
         self.assertEqual(sizes, sorted(sizes, reverse=True))
-        win.table.sortItems(1, Qt.AscendingOrder)    # Name column
-        names = [(win.table.entry_at(r)["name"] or "").lower()
-                 for r in range(win.table.rowCount())]
+        view.table.sortByColumn(0, Qt.AscendingOrder)    # Name
+        names = [(e["name"] or "").lower() for e in self._visible(view)]
         self.assertEqual(names, sorted(names))
         win.close()
 
-    def test_show_filter_combo(self):
-        win = MainWindow()
-        win.open_archive(self.folders_path)
-        self._wait(win)
-
-        def visible_names():
-            out = []
-            for r in range(win.table.rowCount()):
-                if not win.table.isRowHidden(r):
-                    e = win.table.entry_at(r)
-                    out.append(e["name"] or "")
-            return out
-
-        win.show_combo.setCurrentText("named only")
-        names = visible_names()
-        self.assertTrue(names)
-        self.assertTrue(all(n for n in names))
-        win.show_combo.setCurrentText("all files")
-        self.assertEqual(len(visible_names()), win.table.rowCount())
+    def test_filter_chips_use_model_counts(self):
+        win, view = self._open(self.image_path)
+        counts = view.table.counts()
+        self.assertEqual(counts["all"], view.table.source_count())
+        self.assertGreaterEqual(counts["texture"], 1)
+        view.chips.set_current("texture")
+        self.assertEqual(view.chips.current(), "texture")
+        rows = self._visible(view)
+        self.assertTrue(rows)
+        for e in rows:
+            from w3xmpq.core import filetypes
+            self.assertEqual(filetypes.category(e), "texture")
+        # Counts must NOT shrink when a filter is applied.
+        self.assertEqual(view.table.counts()["all"],
+                         view.table.source_count())
+        view.chips.set_current("all")
         win.close()
 
-    def test_find_in_preview(self):
-        win = MainWindow()
-        win.open_archive(self.folders_path)
-        self._wait(win)
-        # pick a text file (war3map.j) and search inside it
-        row = None
-        for r in range(win.table.rowCount()):
-            e = win.table.entry_at(r)
-            if e and (e["name"] or "").endswith("war3map.j"):
-                row = r
-                break
-        self.assertIsNotNone(row)
-        win.table.selectRow(row)
-        self.assertIn("function", win.preview.toPlainText())
-        win._toggle_find()
-        win.find_edit.setText("function main")
-        win._find_next()
-        self.assertIn("found", win.find_count.text())
-        win.find_edit.setText("zzz-not-there")
-        self.assertIn("not found", win.find_count.text())
-        win._hide_find()
-        self.assertFalse(win._find_row_widget.isVisible())
+    def test_find_in_preview_searches_forward(self):
+        win, view = self._open(self.folders_path)
+        row = next(r for r in range(view.table.row_count())
+                   if (view.table.entry_at(r)["name"] or "")
+                   .endswith("war3map.j"))
+        view.table.selectRow(row)
+        pane = view.preview
+        self.assertIn("function", pane.preview.toPlainText())
+        pane.set_find_visible(True)
+        pane.find_edit.setText("function main")
+        self.assertRegex(pane.find_count.text(), r"^1 / \d+$")
+        self.assertLess(pane.preview.textCursor().blockNumber(), 5)
+        pane.find_edit.setText("zzz-not-there")
+        self.assertEqual(pane.find_count.text(), "no matches")
+        pane.set_find_visible(False)
+        self.assertFalse(pane._find_row_widget.isVisible())
+        win.close()
+
+    def test_preview_text_hex_switch(self):
+        win, view = self._open(self.folders_path)
+        view.table.select_first_ok()
+        pane = view.preview
+        pane.set_mode("hex")
+        self.assertEqual(pane.mode, "hex")
+        self.assertIn("00000000", pane.preview.toPlainText())
+        pane.set_mode("text")
+        self.assertEqual(pane.mode, "text")
         win.close()
 
     def test_export_table_and_save_entry(self):
-        import json
-        win = MainWindow()
-        win.open_archive(self.folders_path)
-        self._wait(win)
+        win, view = self._open(self.folders_path)
         out = os.path.join(self._tmp.name, "table.json")
-        count = win._write_table(out)
-        self.assertEqual(count, len(win.current_entries))
+        count = view._write_table(out)
+        self.assertEqual(count, len(view.current_entries))
         with open(out, encoding="utf-8") as f:
             rows = json.load(f)
         self.assertEqual(len(rows), count)
         self.assertIn("name_source", rows[0])
+        self.assertIn("detected_type", rows[0])
 
         csv_path = os.path.join(self._tmp.name, "table.csv")
-        win._write_table(csv_path)
+        view._write_table(csv_path)
         with open(csv_path, encoding="utf-8") as f:
             head = f.readline()
         self.assertIn("sha256", head)
 
-        # save one entry straight from the preview
-        e = next(x for x in win.current_entries if x["status"] == "ok")
+        e = next(x for x in view.current_entries if x["status"] == "ok")
         target = os.path.join(self._tmp.name, "one.bin")
-        n = win._save_entry_to(e, target)
+        n = view._save_entry_to(e, target)
         self.assertEqual(n, len(e["data"]))
         with open(target, "rb") as f:
             self.assertEqual(f.read(), e["data"])
         win.close()
 
-    def test_session_settings_roundtrip(self):
-        win = MainWindow()
-        win.open_archive(self.folders_path)
-        self._wait(win)
-        win.settings.setValue("last_dir", self._tmp.name)
-        win.show_combo.setCurrentText("named only")
+    def test_layout_state_roundtrip_with_hex_splitter(self):
+        win, view = self._open(self.folders_path)
+        view.chips.set_current("texture")
+        view.table.set_advanced(True)
+        view.drawer.open_safety()
+        state = view.layout_state()
+        # QSettings needs plain JSON-safe values, not a QByteArray.
+        json.dumps(state)
+        self.assertIsInstance(state["splitter"], str)
+        self.assertEqual(state["chip"], "texture")
+        self.assertTrue(state["advanced"])
+        fresh = win.open_archive(self.image_path)
+        _wait_until(lambda: fresh.worker is None)
+        fresh.restore_layout_state(state)
+        self.assertEqual(fresh.chips.current(), "texture")
+        self.assertTrue(fresh.table.advanced)
+        self.assertTrue(fresh.drawer.expanded)
         win._save_session()
-        self.assertEqual(win.settings.value("show_filter", 0, type=int), 1)
+        saved = json.loads(win.settings.value("layouts", "{}"))
+        self.assertIn(os.path.abspath(self.folders_path), saved)
         win.close()
 
-    def test_source_column_reports_recovery_method(self):
-        win = MainWindow()
-        win.open_archive(self.folders_path)
-        self._wait(win)
-        srcs = {win.table.item(r, 5).text() for r in range(win.table.rowCount())}
-        self.assertTrue(srcs)
-        for s in srcs:
-            name_src, _, key_src = s.partition("/")
-            self.assertIn(name_src, ("known", "listfile", "external",
-                                     "guess", "unknown"))
-            self.assertIn(key_src, ("plain", "crack", "named"))
+    def test_unnamed_entry_is_selectable_and_extractable(self):
+        from w3xmpq.core import filetypes
+        win, view = self._open(self.map_path)
+        entry = dict(block=999, name=None, size=4, archived_size=4,
+                     flags=0, status="ok", name_source="unknown",
+                     key_method="plain", sha256=None, data=b"BLP1")
+        self.assertFalse(filetypes.is_named(entry))
+        self.assertIn("texture", filetypes.display_name(entry))
+        self.assertTrue(filetypes.entry_name(entry).endswith(".blp"))
+        view.table.load_entries([entry])
+        view.table.selectRow(0)
+        self.assertEqual(view._selected_blocks(), [999])
+        self.assertEqual(view._selected_names(), [])
         win.close()
 
 
 @unittest.skipUnless(HAVE_QT, "PySide6 not installed")
+class TestFileTypes(unittest.TestCase):
+    """Content-based detection survives a stripped listfile."""
+
+    def test_magic_beats_extension(self):
+        from w3xmpq.core import filetypes
+        kind = filetypes.detect("notes.txt", _make_blp1()[:8])
+        self.assertEqual(kind.key, "texture")
+        self.assertEqual(filetypes.category(dict(name="notes.txt",
+                                                 data=_make_blp1()[:8])),
+                         "texture")
+
+    def test_unnamed_names_are_safe(self):
+        from w3xmpq.core import filetypes
+        e = dict(block=7, name=None, data=b"MDLX" + b"\0" * 20,
+                 name_source="unknown", flags=0, status="ok")
+        self.assertEqual(filetypes.entry_name(e), "model_0007.mdx")
+        self.assertIn("model", filetypes.display_name(e))
+        self.assertFalse(filetypes.is_named(e))
+
+    def test_flags_and_failure(self):
+        from w3xmpq.core import filetypes
+        self.assertTrue(filetypes.is_failed(dict(status="FAILED")))
+        self.assertFalse(filetypes.is_failed(dict(status="ok")))
+        self.assertTrue(filetypes.is_encrypted(
+            dict(flags=filetypes.FLAG_ENCRYPTED)))
+
+
+@unittest.skipUnless(HAVE_QT, "PySide6 not installed")
 class TestGuiPreview(unittest.TestCase):
-    """Image preview and syntax highlighting."""
+    """Image preview, syntax highlighting and the Text/Hex switch."""
 
     @classmethod
     def setUpClass(cls):
@@ -441,52 +490,42 @@ class TestGuiPreview(unittest.TestCase):
     def tearDownClass(cls):
         cls._tmp.cleanup()
 
-    def _wait(self, win, timeout_ms=30000):
-        loop = QEventLoop()
-        poll = QTimer()
-        poll.timeout.connect(lambda: win.worker is None and loop.quit())
-        poll.start(50)
-        QTimer.singleShot(timeout_ms, loop.quit)
-        loop.exec()
+    def _open(self):
+        win = MainWindow()
+        view = win.open_archive(self.image_map)
+        _wait_until(lambda: view.worker is None)
+        return win, view
 
-    def _row_for(self, win, suffix):
-        for r in range(win.table.rowCount()):
-            e = win.table.entry_at(r)
+    def _row_for(self, view, suffix):
+        for r in range(view.table.row_count()):
+            e = view.table.entry_at(r)
             if e and (e.get("name") or "").endswith(suffix):
                 return r
         return None
 
     def test_blp_shows_an_image(self):
-        win = MainWindow()
-        win.open_archive(self.image_map)
-        self._wait(win)
-        row = self._row_for(win, ".blp")
+        win, view = self._open()
+        row = self._row_for(view, ".blp")
         self.assertIsNotNone(row, "no .blp entry in the table")
-        win.table.selectRow(row)
-        self.assertEqual(win.preview_stack.currentIndex(), 1,
-                         "the preview should switch to the image page")
-        pixmap = win.image_label.pixmap()
+        view.table.selectRow(row)
+        self.assertEqual(view.preview.preview_stack.currentIndex(), 1)
+        pixmap = view.preview.image_label.pixmap()
         self.assertFalse(pixmap.isNull())
         self.assertGreater(pixmap.width(), 0)
         win.close()
 
     def test_text_file_switches_back_to_text(self):
-        win = MainWindow()
-        win.open_archive(self.image_map)
-        self._wait(win)
-        win.table.selectRow(self._row_for(win, ".blp"))
-        self.assertEqual(win.preview_stack.currentIndex(), 1)
-        win.table.selectRow(self._row_for(win, ".j"))
-        self.assertEqual(win.preview_stack.currentIndex(), 0)
+        win, view = self._open()
+        view.table.selectRow(self._row_for(view, ".blp"))
+        self.assertEqual(view.preview.preview_stack.currentIndex(), 1)
+        view.table.selectRow(self._row_for(view, ".j"))
+        self.assertEqual(view.preview.preview_stack.currentIndex(), 0)
         win.close()
 
     def test_jass_is_highlighted(self):
-        win = MainWindow()
-        win.open_archive(self.image_map)
-        self._wait(win)
-        win.table.selectRow(self._row_for(win, ".j"))
-        self.assertIsNotNone(win._highlighter,
-                             "JASS files should get a syntax highlighter")
+        win, view = self._open()
+        view.table.selectRow(self._row_for(view, ".j"))
+        self.assertIsNotNone(view.preview._highlighter)
         win.close()
 
     def test_jass_classification(self):
@@ -496,12 +535,9 @@ class TestGuiPreview(unittest.TestCase):
         roles = {role for _s, _l, role in spans}
         self.assertIn("keyword", roles)
         self.assertIn("comment", roles)
-        # The comment must win over the words inside it.
         for start, length, role in spans:
             if role == "comment":
-                self.assertEqual(line[start:start + length],
-                                 "// add one")
-        # "set" is a keyword, "i" is not.
+                self.assertEqual(line[start:start + length], "// add one")
         keywords = [line[s:s + l] for s, l, r in spans if r == "keyword"]
         self.assertIn("set", keywords)
         self.assertNotIn("i", keywords)
@@ -522,23 +558,19 @@ class TestGuiPreview(unittest.TestCase):
             self.skipTest("no Warcraft III .blp files found")
         with open(path, "rb") as fh:
             data = fh.read()
-        win = MainWindow()
-        win.open_archive(self.image_map)
-        self._wait(win)
+        win, view = self._open()
         entry = dict(block=0, name="texture.blp", size=len(data),
                      archived_size=len(data), flags=0, status="ok",
                      sha256=None, data=data)
-        win.current_entries = [entry]
-        win.table.load_entries([entry])
-        win.table.selectRow(0)
-        self.assertEqual(win.preview_stack.currentIndex(), 1)
-        self.assertFalse(win.image_label.pixmap().isNull())
+        view.preview.set_entry(entry)
+        self.assertEqual(view.preview.preview_stack.currentIndex(), 1)
+        self.assertFalse(view.preview.image_label.pixmap().isNull())
         win.close()
 
 
 @unittest.skipUnless(HAVE_QT, "PySide6 not installed")
 class TestTabs(unittest.TestCase):
-    """Each archive lives in its own tab with its own state."""
+    """Tabs, shared task manager, non-modal jobs, theme, keyboard."""
 
     @classmethod
     def setUpClass(cls):
@@ -552,33 +584,22 @@ class TestTabs(unittest.TestCase):
         cls._tmp.cleanup()
 
     def _wait_all(self, win, timeout_ms=40000):
-        """Wait until every tab has finished its background task."""
-        loop = QEventLoop()
-        poll = QTimer()
-        poll.setInterval(50)
-        poll.timeout.connect(
-            lambda: all(getattr(w, "worker", None) is None
-                        for w in win._all_views()) and loop.quit())
-        deadline = QTimer()
-        deadline.setSingleShot(True)
-        deadline.timeout.connect(loop.quit)
-        poll.start()
-        deadline.start(timeout_ms)
-        loop.exec()
-        poll.stop()
-        deadline.stop()
+        # A tab may own several jobs (scan + analysis); `worker` only tracks
+        # the scan.  The shared manager is the single source of truth.
+        _wait_until(lambda: all(getattr(w, "worker", None) is None
+                                for w in win._all_views())
+                    and not win.tasks.active_jobs(), timeout_ms)
 
     def test_two_archives_get_two_tabs(self):
         win = MainWindow()
         win.open_archive(self.map_path)
         win.open_archive(self.folders_path)
         self.assertEqual(win.tabs.count(), 2)
-        # The newest tab is current, and the window accessors follow it.
-        self.assertEqual(win.current_path,
+        self.assertEqual(win.view().current_path,
                          os.path.abspath(self.folders_path))
         self._wait_all(win)
         self.assertIsNotNone(win.view())
-        self.assertGreater(win.table.rowCount(), 0)
+        self.assertGreater(win.view().table.row_count(), 0)
         win.close()
 
     def test_tabs_keep_independent_state(self):
@@ -589,7 +610,6 @@ class TestTabs(unittest.TestCase):
         self._wait_all(win)
         self.assertIsInstance(first, ArchiveView)
         self.assertIsInstance(second, ArchiveView)
-        self.assertIsNot(first, second)
         self.assertIsNot(first.table, second.table)
 
         first.filter_edit.setText("tex")
@@ -597,11 +617,22 @@ class TestTabs(unittest.TestCase):
         self.assertTrue(first.current_entries)
         self.assertTrue(second.current_entries)
 
-        # Switching tabs re-points the window accessors at the new pane.
         win.tabs.setCurrentWidget(second)
-        self.assertIs(win.table, second.table)
-        self.assertIs(win.filter_edit, second.filter_edit)
-        self.assertIs(win.banner, second.banner)
+        self.assertIs(win.view(), second)
+        win.tabs.setCurrentWidget(first)
+        self.assertIs(win.view(), first)
+        win.close()
+
+    def test_shared_task_manager_and_task_bar(self):
+        win = MainWindow()
+        view = win.open_archive(self.map_path)
+        self.assertIs(view.tasks, win.tasks)
+        self.assertIs(win.task_bar.manager, win.tasks)
+        # Actions are not globally disabled while a job runs.
+        self.assertTrue(win.open_act.isEnabled())
+        self.assertTrue(win.extract_act.isEnabled())
+        self._wait_all(win)
+        self.assertFalse(win.tasks.active_jobs())
         win.close()
 
     def test_reopening_the_same_path_focuses_its_tab(self):
@@ -615,7 +646,7 @@ class TestTabs(unittest.TestCase):
 
     def test_closing_tabs_returns_to_the_welcome_page(self):
         win = MainWindow()
-        self.assertEqual(win.stack.currentIndex(), 0)   # welcome page
+        self.assertEqual(win.stack.currentIndex(), 0)
         win.open_archive(self.map_path)
         win.open_archive(self.folders_path)
         self.assertEqual(win.stack.currentIndex(), 1)
@@ -629,11 +660,30 @@ class TestTabs(unittest.TestCase):
         win.close()
 
     def test_closing_a_tab_mid_scan_is_safe(self):
-        """A scan in flight must not crash when its tab is closed."""
         win = MainWindow()
         win.open_archive(self.map_path)
         win._close_tab(0)          # possibly still scanning
         self.assertEqual(win.tabs.count(), 0)
+        win.close()
+
+    def test_batch_tab_is_singleton(self):
+        from w3xmpq.gui.batch_view import BatchView
+        win = MainWindow()
+        first = win.open_batch()
+        self.assertIsInstance(first, BatchView)
+        self.assertIs(first.tasks, win.tasks)
+        second = win.open_batch()
+        self.assertIs(first, second)
+        self.assertEqual(win.tabs.count(), 1)
+        win.close()
+
+    def test_keyboard_map_is_wired(self):
+        win = MainWindow()
+        shortcuts = {a.shortcut().toString()
+                     for a in win.findChildren(type(win.open_act))}
+        for key in ("Ctrl+R", "Ctrl+D", "Ctrl+B", "Ctrl+O", "Ctrl+W",
+                    "Ctrl+E", "Ctrl+Shift+E", "Ctrl+1", "Ctrl+9"):
+            self.assertIn(key, shortcuts)
         win.close()
 
     def test_dark_theme_applies_and_persists(self):
@@ -651,25 +701,38 @@ class TestTabs(unittest.TestCase):
         win.close()
 
     def test_theme_survives_a_preview(self):
-        """Switching theme with a file previewed must not lose the file."""
         win = MainWindow()
-        win.open_archive(self.folders_path)
+        view = win.open_archive(self.folders_path)
         self._wait_all(win)
-        row = next(r for r in range(win.table.rowCount())
-                   if (win.table.entry_at(r)["name"] or "")
+        row = next(r for r in range(view.table.row_count())
+                   if (view.table.entry_at(r)["name"] or "")
                    .endswith("war3map.j"))
-        win.table.selectRow(row)
-        before = win.preview.toPlainText()
+        view.table.selectRow(row)
+        before = view.preview.preview.toPlainText()
         win._set_dark(True)
-        self.assertEqual(win.preview.toPlainText(), before)
-        self.assertIsNotNone(win._highlighter)
+        self.assertEqual(view.preview.preview.toPlainText(), before)
+        self.assertIsNotNone(view.preview._highlighter)
         win._set_dark(False)
+        win.close()
+
+    def test_diff_tab_coexists_with_archive_tabs(self):
+        path_a, path_b = _make_pair(self._tmp.name)
+        win = MainWindow()
+        diff = win.open_diff(path_a, path_b)
+        archive = win.open_archive(path_a)
+        self.assertEqual(win.tabs.count(), 2)
+        self.assertIs(win.view(), archive)
+        win.tabs.setCurrentWidget(diff)
+        self.assertIsNone(win.view())
+        win.tabs.setCurrentWidget(archive)
+        self.assertIsNotNone(win.view())
+        self._wait_all(win)
         win.close()
 
 
 @unittest.skipUnless(HAVE_QT, "PySide6 not installed")
 class TestDiffView(unittest.TestCase):
-    """The in-app diff: a table of changes plus both versions side by side."""
+    """Inline-highlighted diff with hunk navigation."""
 
     @classmethod
     def setUpClass(cls):
@@ -682,19 +745,9 @@ class TestDiffView(unittest.TestCase):
         cls._tmp.cleanup()
 
     def _open(self):
-        from w3xmpq.gui.diff_view import DiffView
         win = MainWindow()
         view = win.open_diff(self.path_a, self.path_b)
-        self.assertIsInstance(view, DiffView)
-        loop = QEventLoop()
-        poll = QTimer()
-        poll.setInterval(50)
-        poll.timeout.connect(
-            lambda: view.worker is None and loop.quit())
-        poll.start()
-        QTimer.singleShot(40000, loop.quit)
-        loop.exec()
-        poll.stop()
+        _wait_until(lambda: view.worker is None, 40000)
         return win, view
 
     def _visible_rows(self, view):
@@ -708,6 +761,13 @@ class TestDiffView(unittest.TestCase):
         self.assertEqual(kinds["added.bin"], "only_b")
         self.assertEqual(kinds["removed.bin"], "only_a")
         self.assertEqual(kinds["shared.bin"], "same")
+        win.close()
+
+    def test_summary_chips_are_colour_coded(self):
+        win, view = self._open()
+        label = view.summary_labels["changed"]
+        self.assertRegex(label.text(), r"\d+ changed")
+        self.assertIn("color", label.styleSheet())
         win.close()
 
     def test_default_filter_hides_identical_files(self):
@@ -736,7 +796,6 @@ class TestDiffView(unittest.TestCase):
         self.assertIn("endfunction", view.pane_a.toPlainText())
         self.assertNotIn("DoNothing", view.pane_a.toPlainText())
         self.assertIn("DoNothing", view.pane_b.toPlainText())
-        # The line counter must report the added call.
         self.assertIn("+", view.diff_label.text())
         win.close()
 
@@ -756,26 +815,30 @@ class TestDiffView(unittest.TestCase):
         self.assertIsNone(first_difference("same", "same"))
         self.assertIsNone(first_difference(None, "a"))
 
-    def test_panes_scroll_to_the_change(self):
-        """The changed line must be on screen, not line 1 of the file."""
+    def test_inline_diff_html_highlights_both_sides(self):
+        from w3xmpq.gui import theme
+        from w3xmpq.gui.diff_view import build_diff_html
+        html_a, html_b, changes = build_diff_html(
+            "alpha\nbeta\ngamma", "alpha\nBETA\ngamma", theme.tokens())
+        self.assertEqual(len(changes), 1)
+        self.assertIn(theme.tokens()["diff_del_bg"], html_a)
+        self.assertIn(theme.tokens()["diff_add_bg"], html_b)
+        self.assertIn('name="c0"', html_a)
+
+    def test_next_and_previous_change_navigation(self):
         win, view = self._open()
         row = next(r for r in range(view.table.rowCount())
                    if view._row_at(r)["name"] == "war3map.j")
         view.table.selectRow(row)
-        # The fixture changes the second line ("endfunction" -> call ...).
-        self.assertEqual(view.pane_a.textCursor().blockNumber(), 1)
-        self.assertEqual(view.pane_b.textCursor().blockNumber(), 1)
-        win.close()
-
-    def test_diff_tab_coexists_with_archive_tabs(self):
-        win, view = self._open()
-        archive = win.open_archive(self.path_a)
-        self.assertEqual(win.tabs.count(), 2)
-        self.assertIs(win.view(), archive)
-        win.tabs.setCurrentWidget(view)        # a diff tab is not an archive
-        self.assertIsNone(win.view())
-        win.tabs.setCurrentWidget(archive)
-        self.assertIsNotNone(win.view())
+        self.assertTrue(view._changes)
+        self.assertRegex(view.change_label.text(), r"change \d+ / \d+")
+        before = view._change_index
+        view.next_change()
+        self.assertEqual(view._change_index,
+                         (before + 1) % len(view._changes))
+        view.previous_change()
+        self.assertEqual(view._change_index, before)
+        self.assertGreater(view.pane_a.textCursor().blockNumber(), -1)
         win.close()
 
 

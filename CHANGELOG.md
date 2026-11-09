@@ -2,6 +2,40 @@
 
 ## Unreleased
 
+### New — GUI redesign (inspector-first)
+- **The verdict is the headline.** A summary strip shows `X / Y blocks
+  recovered` with a progress bar, map metadata, the safety badge and the
+  accent **Rebuild for WorldEdit** button. The seven-button toolbar is now
+  just Open / Recent / Theme.
+- **Filter chips with counts** (All, Scripts, Textures, Models, Sounds,
+  Unnamed, Failed, Encrypted) replace the "show" combo. Types are detected
+  from magic bytes, so protected maps with stripped names still classify;
+  nameless entries display as `‹texture› block_0123.blp` and are
+  selectable/extractable **by MPQ block number**.
+- **Model-backed table.** `QTableView` + `QAbstractTableModel` +
+  `QSortFilterProxyModel` replace the `QTableWidget` hide/show loop.
+  Block/Packed/Flags/Src move to hidden-by-default Advanced columns with
+  header-menu toggles and flag tooltips.
+- **Preview header** with detected type, visible Find, Text/Hex switch,
+  Copy and Save as. Find searches forward while typing.
+- **Report and Safety are a bottom drawer**, not modal text dumps:
+  sections, severity icons, click-to-jump-to-file. Both run automatically
+  after a scan and reuse the in-memory entries, so a map is decrypted once.
+- **Non-modal tasks.** A shared `TaskManager` runs scan, extract, rebuild,
+  diff, batch and analysis concurrently; the status bar shows one progress
+  row per job with cancel. Nothing disables the whole window.
+- **Real diff.** Inline `SequenceMatcher` highlights, ▲/▼ change
+  navigation, BLP sides rendered as images, colour-coded change summary.
+  **Batch** is a persistent tab with a per-map results table.
+- **Empty state** with a large drop zone, recent maps and a keyboard map;
+  per-archive layout (splitter, chip, Advanced columns, drawer, preview
+  mode, Find) is remembered via `QSettings`.
+- `archive_view.py` split into `summary_strip`, `file_model`, `chips`,
+  `preview_pane`, `folder_tree`, `analysis_drawer`; theme colours are now
+  semantic tokens (`accent`, `success`, `warn`, `danger`, `muted`, …).
+- `MainWindow` takes an injectable `settings`, so tests use throw-away
+  INI files instead of touching the user's real preferences.
+
 ### New — object data
 - **`w3xmpq objects`** decodes the map's object-data files — `war3map.w3u`
   (units), `.w3t` (items), `.w3a` (abilities), `.w3b` (destructables),

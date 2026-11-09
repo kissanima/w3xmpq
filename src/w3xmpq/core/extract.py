@@ -17,6 +17,7 @@ import os
 import re
 
 from .mpq import MPQArchive
+from . import filetypes
 from .names import KNOWN_NAMES, NAME_REMAP, guess_name
 from .sectors import extract_block
 
@@ -184,28 +185,44 @@ def scan_archive(path, listfile=None, progress=None, should_stop=None):
     return entries
 
 
-def extract_archive(path, outdir, pattern=None, verbose=True, listfile=None):
+def extract_archive(path, outdir, pattern=None, verbose=True, listfile=None,
+                    blocks=None, progress=None, should_stop=None):
     """Extract every recoverable file from `path` into `outdir`.
 
-    `pattern` (regex, matched against resolved names) limits extraction.
-    `listfile`: extra known filenames for hash-probing (non-WC3 archives).
-    Returns the manifest (list of dicts; same fields as scan_archive
-    entries minus `data`), and writes manifest.json into `outdir`.
+    `pattern` (regex, matched against resolved names) and `blocks` (an
+    iterable of MPQ block indices) both limit extraction; the latter is
+    what lets the GUI extract *unnamed* files, whose resolved name is
+    empty and therefore cannot be matched by a regex.
+
+    `progress` is an optional ``callback(done, total)`` forwarded to
+    `scan_archive`, which emits it once per decrypted block with the real
+    block-table total (the expensive part of an extraction).  Returns the
+    manifest (list of dicts; same fields as scan_archive entries minus
+    `data`) and writes manifest.json.
     """
     rx = re.compile(pattern) if pattern else None
+    wanted = set(blocks) if blocks is not None else None
     os.makedirs(outdir, exist_ok=True)
 
     got, failed = 0, 0
     used_names = set()
     manifest = []
-    for e in scan_archive(path, listfile=listfile):
+    entries = scan_archive(path, listfile=listfile, progress=progress,
+                           should_stop=should_stop)
+    for e in entries:
+        if should_stop is not None and should_stop():
+            break
         rec = {k: v for k, v in e.items() if k != 'data'}
-        if e['status'] != 'ok' or (rx and not rx.search(e['name'] or '')):
+        skip_by_name = rx is not None and not rx.search(e['name'] or '')
+        skip_by_block = wanted is not None and e['block'] not in wanted
+        if e['status'] != 'ok' or skip_by_name or skip_by_block:
             if e['status'] != 'ok':
                 failed += 1
             manifest.append(rec)
             continue
-        name = e['name']
+        # A nameless block still needs a real output filename.  The type
+        # detector supplies a sensible extension from the magic bytes.
+        name = filetypes.entry_name(e)
         base, ext = os.path.splitext(name)
         candidate = name
         n = 1
