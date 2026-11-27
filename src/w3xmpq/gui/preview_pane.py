@@ -21,6 +21,9 @@ from ..core import filetypes
 from ..core.blp import open_blp
 from . import theme
 from .jass_highlight import JassHighlighter, is_jass
+from .model_preview_data import (Mdx2FbxError, build_preview_mesh,
+                                 empty_preview_mesh)
+from .model_view import ModelView
 
 TEXT_EXT = (".j", ".txt", ".ai", ".md", ".csv", ".json", ".xml", ".ini",
             ".wct", ".wtg", ".slk", ".wts")
@@ -83,6 +86,7 @@ class PreviewPane(QWidget):
     """Preview for the currently selected entry."""
 
     save_requested = Signal(object)
+    model_export_requested = Signal(object)
     status = Signal(str)
 
     def __init__(self, parent=None):
@@ -91,6 +95,7 @@ class PreviewPane(QWidget):
         self._text = ""
         self._hex = ""
         self._mode = "text"
+        self._model_mesh = empty_preview_mesh()
         self._highlighter = None
         self._match_total = 0
         self._match_index = 0
@@ -123,18 +128,45 @@ class PreviewPane(QWidget):
 
         self.mode_group = QButtonGroup(self)
         self.mode_group.setExclusive(True)
+        self.model_btn = QPushButton("Model")
         self.text_btn = QPushButton("Text")
         self.hex_btn = QPushButton("Hex")
-        for btn in (self.text_btn, self.hex_btn):
+        for btn in (self.model_btn, self.text_btn, self.hex_btn):
             btn.setCheckable(True)
             theme.set_role(btn, "ghost")
-            btn.setMaximumWidth(52)
+            btn.setMaximumWidth(58)
             self.mode_group.addButton(btn)
             hbox.addWidget(btn)
+        self.model_btn.setToolTip("Show the static 3D model preview")
         self.text_btn.setChecked(True)
+        self.model_btn.clicked.connect(lambda: self.set_mode("model"))
         self.text_btn.clicked.connect(lambda: self.set_mode("text"))
         self.hex_btn.clicked.connect(lambda: self.set_mode("hex"))
         self.mode_group.buttonClicked.connect(self._mode_button)
+
+        self.wire_btn = QPushButton("Wire")
+        self.wire_btn.setCheckable(True)
+        self.wire_btn.setToolTip("Toggle wireframe rendering")
+        theme.set_role(self.wire_btn, "ghost")
+        self.wire_btn.setMaximumWidth(52)
+        self.wire_btn.toggled.connect(
+            lambda on: self.model_view.set_mode("wire" if on else "solid"))
+        hbox.addWidget(self.wire_btn)
+        self.reset_btn = QPushButton("Reset")
+        self.reset_btn.setToolTip("Reset the model camera")
+        theme.set_role(self.reset_btn, "ghost")
+        self.reset_btn.setMaximumWidth(58)
+        self.reset_btn.clicked.connect(lambda: self.model_view.reset_view())
+        hbox.addWidget(self.reset_btn)
+        self.export_model_btn = QPushButton("Export FBX")
+        self.export_model_btn.setToolTip("Export this model as static FBX")
+        theme.set_role(self.export_model_btn, "ghost")
+        self.export_model_btn.clicked.connect(
+            lambda: self.model_export_requested.emit(self.entry))
+        hbox.addWidget(self.export_model_btn)
+        self._model_controls = (self.wire_btn, self.reset_btn,
+                                self.export_model_btn)
+        self._show_model_controls(False)
 
         self.copy_btn = QPushButton("Copy")
         theme.set_role(self.copy_btn, "ghost")
@@ -199,16 +231,24 @@ class PreviewPane(QWidget):
         self.image_label.setAlignment(Qt.AlignCenter)
         self.image_scroll.setWidget(self.image_label)
         self.preview_stack.addWidget(self.image_scroll)
+
+        self.model_view = ModelView()
+        self.preview_stack.addWidget(self.model_view)
         layout.addWidget(self.preview_stack, 1)
 
     # ------------------------------------------------------------ entry
     def clear(self):
         self.entry = None
         self._text = self._hex = ""
+        self._model_mesh = empty_preview_mesh()
         self.name_label.setText("No file selected")
         self.type_label.setText("")
         self.preview.setPlainText("")
         self.image_label.clear()
+        self.model_view.clear()
+        self._show_model_controls(False)
+        self.model_btn.setChecked(False)
+        self.text_btn.setChecked(True)
         self._show_text_page()
         self._detach_highlighter()
 
@@ -227,23 +267,41 @@ class PreviewPane(QWidget):
         self.type_label.setText("%s %s" % (kind.label, kind.ext))
         self._text = preview_text(name, data)
         self._hex = hex_text(data)
-        # Start on the image for a texture, on text otherwise.
-        if kind.key == "texture" and self._show_image(name, data):
-            self._detach_highlighter()
+        # Single-click routing: models open on the 3D page, textures on the
+        # image page, everything else on text. Text/Hex stay one click away.
+        if kind.key == "model" and data[:4] == b"MDLX":
+            self._show_model(name, data)
         else:
-            self._show_text_page()
-            self._render_mode()
+            self._model_mesh = empty_preview_mesh()
+            self.model_view.clear()
+            self._show_model_controls(False)
+            if kind.key == "texture" and self._show_image(name, data):
+                self._detach_highlighter()
+            else:
+                self._show_text_page()
+                self._render_mode()
 
     def set_mode(self, mode):
-        """Manual Text/Hex switch — also leaves the image page."""
+        """Manual Model/Text/Hex switch."""
+        if mode == "model" and self._model_mesh.get("included_geosets"):
+            self._mode = "model"
+            self.model_btn.setChecked(True)
+            self.preview_stack.setCurrentIndex(2)
+            self._show_model_controls(True)
+            self._detach_highlighter()
+            return
         self._mode = "hex" if mode == "hex" else "text"
         (self.hex_btn if self._mode == "hex" else self.text_btn) \
             .setChecked(True)
+        self._show_model_controls(False)
         self._show_text_page()
         self._render_mode()
 
     def _mode_button(self, button):
-        self.set_mode("hex" if button is self.hex_btn else "text")
+        if button is self.model_btn:
+            self.set_mode("model")
+        else:
+            self.set_mode("hex" if button is self.hex_btn else "text")
 
     @property
     def mode(self):
@@ -257,9 +315,47 @@ class PreviewPane(QWidget):
         if self._find_row_widget.isVisible():
             self._find_changed(self.find_edit.text())
 
-    # --------------------------------------------------------- image
+    # --------------------------------------------------------- pages
     def _show_text_page(self):
         self.preview_stack.setCurrentIndex(0)
+
+    def _show_model_controls(self, visible):
+        for button in self._model_controls:
+            button.setVisible(bool(visible))
+
+    def _show_model(self, name, data):
+        """Build and show a bounded static preview from MDX bytes."""
+        try:
+            mesh = build_preview_mesh(data)
+        except (Mdx2FbxError, ValueError, OSError) as exc:
+            self._model_mesh = empty_preview_mesh()
+            self.model_view.clear()
+            self._show_model_controls(False)
+            self._show_text_page()
+            self.preview.setPlainText("Could not render %s:\n%s"
+                                      % (name or "model", exc))
+            self.status.emit("Could not render model: %s" % exc)
+            return False
+        self._model_mesh = mesh
+        self.model_view.set_mesh(mesh)
+        self.model_view.set_mode("wire" if self.wire_btn.isChecked()
+                                 else "solid")
+        self._mode = "model"
+        self.model_btn.setChecked(True)
+        self._show_model_controls(True)
+        self.preview_stack.setCurrentIndex(2)
+        self._detach_highlighter()
+        self.type_label.setText("%s %s · %d geoset(s), %d tris"
+                                % (filetypes.detect(name, data).label,
+                                   filetypes.detect(name, data).ext,
+                                   mesh["included_geosets"],
+                                   mesh["triangle_count"]))
+        note = "rest pose; no animation or textures"
+        if mesh["truncated"]:
+            note += "; export truncated by limits"
+        self.status.emit("%s — %s" % (filetypes.display_name(self.entry),
+                                      note))
+        return True
 
     def _show_image(self, name, data):
         mip = None

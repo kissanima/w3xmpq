@@ -207,6 +207,21 @@ The same API is re-exported at package level as `w3xmpq.convert_mdx_to_fbx`
 and `w3xmpq.Mdx2FbxError`. The CLI equivalent is
 `w3xmpq mdx2fbx SOURCE [MEMBER] -o OUT.fbx --json`.
 
+### `w3xmpq.gui.model_preview_data` — 3D preview buffers
+
+`build_preview_mesh(data, ...)` consumes the same bounded extraction and
+returns flat `positions`, `normals`, `colors`, `indices` and `wire_indices`
+arrays plus bounds, a camera radius and explicit `unresolved` notes. It is
+Qt-free, so a headless agent can verify exactly what the GUI would draw.
+`empty_preview_mesh()` is the safe zero-mesh fallback. Missing normals use a
+preview-only +Z fallback and are reported; they are never written back to FBX.
+
+The GUI consumes these buffers in `w3xmpq.gui.model_view.ModelView`. A single
+click on an `MDLX`/`.mdx` row selects the Model page automatically; the
+viewport supports left-drag orbit, wheel zoom, right-drag pan, wireframe and
+camera reset. The **Export FBX** button calls `convert_mdx_to_fbx` on the
+selected entry. Preview never writes a temporary FBX.
+
 ## Error handling
 
 - `scan_archive` / `extract_archive` never raise on individual bad blocks —

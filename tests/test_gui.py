@@ -92,6 +92,17 @@ def _make_image_map(tmp):
     return path
 
 
+def _make_model_map(tmp):
+    """A .w3x holding one synthetic static MDX model."""
+    from test_mdx2fbx import build_mdx
+    path = os.path.join(tmp, 'models.w3x')
+    files = [dict(name='Units\\Test\\Test.mdx', data=build_mdx(),
+                  flags=gen_synth.F_EXISTS)]
+    with open(path, 'wb') as f:
+        f.write(gen_synth.build_w3x(gen_synth.build_archive(files)))
+    return path
+
+
 def _real_blp_path():
     """A genuine Warcraft III .blp file, if the game is installed."""
     base = os.path.abspath(os.path.join(
@@ -485,6 +496,7 @@ class TestGuiPreview(unittest.TestCase):
         cls.app = QApplication.instance() or QApplication([])
         cls._tmp = tempfile.TemporaryDirectory()
         cls.image_map = _make_image_map(cls._tmp.name)
+        cls.model_map = _make_model_map(cls._tmp.name)
 
     @classmethod
     def tearDownClass(cls):
@@ -520,6 +532,23 @@ class TestGuiPreview(unittest.TestCase):
         self.assertEqual(view.preview.preview_stack.currentIndex(), 1)
         view.table.selectRow(self._row_for(view, ".j"))
         self.assertEqual(view.preview.preview_stack.currentIndex(), 0)
+        win.close()
+
+    def test_mdx_shows_model_on_single_click(self):
+        win = MainWindow()
+        view = win.open_archive(self.model_map)
+        _wait_until(lambda: view.worker is None)
+        row = self._row_for(view, ".mdx")
+        self.assertIsNotNone(row, "no .mdx entry in the table")
+        view.table.selectRow(row)
+        self.assertEqual(view.preview.preview_stack.currentIndex(), 2)
+        self.assertTrue(view.preview.model_btn.isChecked())
+        self.assertEqual(view.preview.model_view.mesh['included_geosets'], 1)
+        self.assertEqual(view.preview.model_view.mesh['triangle_count'], 2)
+        view.preview.set_mode("text")
+        self.assertEqual(view.preview.preview_stack.currentIndex(), 0)
+        view.preview.set_mode("model")
+        self.assertEqual(view.preview.preview_stack.currentIndex(), 2)
         win.close()
 
     def test_jass_is_highlighted(self):

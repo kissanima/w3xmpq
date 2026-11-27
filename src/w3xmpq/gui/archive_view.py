@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (QFileDialog, QHBoxLayout, QLineEdit, QMenu,
                                QSplitter, QVBoxLayout, QWidget)
 
 from ..core import filetypes
+from ..core.mdx2fbx import Mdx2FbxError, convert_mdx_to_fbx
 from ..core.report import build_report, render_report
 from ..core.safety import scan_safety, render_safety
 from . import theme
@@ -113,6 +114,7 @@ class ArchiveView(QWidget):
         self.chips.changed.connect(self._apply_filters)
         self.folders.folder_selected.connect(self.apply_folder_filter)
         self.preview.save_requested.connect(self.save_preview)
+        self.preview.model_export_requested.connect(self.export_model)
         self.preview.status.connect(self.status.emit)
         if self.drawer is not None:
             self.drawer.file_requested.connect(self.jump_to)
@@ -401,6 +403,37 @@ class ArchiveView(QWidget):
             self.status.emit("Could not save: %s" % exc)
             return
         self.status.emit("Saved %s" % out)
+
+    def export_model(self, entry=None):
+        """Export the selected MDX as static FBX plus a JSON sidecar."""
+        e = entry if entry is not None else self.table.current_entry()
+        if e is None or filetypes.is_failed(e) or e.get("data") is None:
+            self.status.emit("Nothing to export — select a recovered model.")
+            return
+        data = e["data"]
+        if data[:4] != b"MDLX":
+            self.status.emit("Only Warcraft III MDLX models can be exported.")
+            return
+        suggested = os.path.splitext(
+            filetypes.entry_name(e).replace("\\", "_"))[0] + ".fbx"
+        out, _ = QFileDialog.getSaveFileName(
+            self, "Export model as FBX", suggested, "FBX (*.fbx)")
+        if not out:
+            return
+        try:
+            report = convert_mdx_to_fbx(
+                data, out, sidecar_path=out + ".json",
+                source_info={"kind": "archive-entry",
+                             "archive": self.current_path or "",
+                             "member": e.get("name") or
+                             filetypes.entry_name(e)})
+        except (OSError, Mdx2FbxError, ValueError) as exc:
+            self.status.emit("Could not export FBX: %s" % exc)
+            return
+        model = report["model"]
+        self.status.emit("Exported FBX — %d geoset(s), %d triangles -> %s"
+                         % (model["included_geosets"],
+                            model["triangle_count"], out))
 
     def _save_entry_to(self, entry, path):
         with open(path, "wb") as f:

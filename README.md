@@ -133,6 +133,10 @@ A professional windowed interface built on Qt/PySide6:
   a hex dump
 - **Texture preview** — `.blp` files are decoded and shown as images,
   including the JPEG-flavoured textures Warcraft III 1.22+ uses
+- **Static 3D model preview** — a **single click** on an `MDLX`/`.mdx` row
+  opens an orbitable, zoomable rest-pose mesh in the preview pane; wireframe,
+  reset-view and **Export FBX** buttons sit in the preview header. No
+  temporary FBX is created just to preview the model
 - **JASS syntax highlighting** — keywords, natives, numbers and comments
   are coloured in script previews
 - **Right-click** a file → Preview · Extract selected… · Copy name
@@ -204,6 +208,10 @@ Agent-friendly defaults: vertex budget 50,000, index budget 150,000, geoset
 budget 128; all three are overridable. Exceeding a limit truncates and sets
 `truncated: true` — it never guesses missing geometry. Use `w3xmpq mdx2fbx
 --help` for the full contract and copy-paste examples.
+
+In the GUI, selecting a model previews this same geometry directly; the FBX
+button above the viewport calls the exporter with the selected archive entry.
+The preview is read-only and uses the same vertex/index/geoset limits.
 
 The converter is deliberately conservative. It does **not** apply animation,
 skin weights, material/texture animation, shader semantics, particle/light/
