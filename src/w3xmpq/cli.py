@@ -19,6 +19,9 @@ from .core.mpq_write import rebuild_map
 from .core.w3x_header import is_w3x, parse_header
 from .core.report import build_report, render_report
 from .core.safety import scan_safety, render_safety
+from .core.mdx2fbx import (DEFAULT_MAX_GEOSETS, DEFAULT_MAX_INDICES,
+                           DEFAULT_MAX_VERTICES, Mdx2FbxError,
+                           convert_mdx_to_fbx, read_archive_member)
 
 FLAGS_SHORT = [(0x80000000, "E"),      # EXISTS
                (0x00000200, "Z"),      # COMPRESS
@@ -332,6 +335,68 @@ def cmd_objects(args):
     return 0
 
 
+def _default_fbx_output(source, member):
+    base = str(member or source).replace("\\", "/").rsplit("/", 1)[-1]
+    stem = os.path.splitext(base)[0] or "model"
+    return os.path.join(os.getcwd(), stem + ".fbx")
+
+
+def cmd_mdx2fbx(args):
+    """Export bounded static MDX geometry to FBX plus a JSON sidecar."""
+    texture_map = None
+    if args.texture_map:
+        try:
+            with open(args.texture_map, "r", encoding="utf-8") as fh:
+                texture_map = json.load(fh)
+        except (OSError, ValueError) as e:
+            _die("bad --texture-map: %s" % e)
+        if not isinstance(texture_map, dict):
+            _die("--texture-map must be a JSON object")
+
+    source_info = {}
+    try:
+        if args.member:
+            data, member = read_archive_member(args.source, args.member)
+            if data is None:
+                _die("model member not found in %s: %s"
+                     % (args.source, args.member))
+            source_info = {"kind": "archive-member",
+                           "archive": args.source,
+                           "member": member}
+        else:
+            with open(args.source, "rb") as fh:
+                data = fh.read()
+            source_info = {"kind": "file", "file": args.source}
+    except (OSError, Mdx2FbxError) as e:
+        _die(e)
+
+    out = args.out or _default_fbx_output(args.source, args.member)
+    write_sidecar = not args.no_sidecar
+    sidecar = args.sidecar or (out + ".json") if write_sidecar else None
+    try:
+        report = convert_mdx_to_fbx(
+            data, out, sidecar_path=sidecar, texture_map=texture_map,
+            max_vertices=args.max_vertices, max_indices=args.max_indices,
+            max_geosets=args.max_geosets, write_sidecar=write_sidecar,
+            source_info=source_info)
+    except (OSError, Mdx2FbxError, ValueError) as e:
+        _die(e)
+
+    if args.json:
+        _print_json(report)
+        return 0
+    model = report["model"]
+    print("Wrote %s — %d geoset(s), %d vertices, %d triangles"
+          % (out, model["included_geosets"], model["vertex_count"],
+             model["triangle_count"]))
+    if sidecar:
+        print("Sidecar: %s" % sidecar)
+    if report["truncated"]:
+        print("warning: model exceeded export limits; see sidecar",
+              file=sys.stderr)
+    return 0
+
+
 def _fmt_value(value):
     if isinstance(value, str):
         text = value.replace("\r", "\\r").replace("\n", "\\n")
@@ -364,7 +429,8 @@ def build_parser():
     ap = argparse.ArgumentParser(
         prog="w3xmpq",
         description="w3xmpq — open any MPQ archive or Warcraft III map. "
-                    "Recovers encrypted files without a listfile or keys.")
+                    "Recovers encrypted files without a listfile or keys, "
+                    "and exports static MDX models to FBX.")
     ap.add_argument("--version", action="version",
                     version="w3xmpq %s" % __version__)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -439,6 +505,49 @@ def build_parser():
                       help="mipmap level to export (0 = full size)")
     pblp.set_defaults(func=cmd_blp)
 
+    pm = sub.add_parser(
+        "mdx2fbx",
+        help="export static MDX geometry to FBX + JSON sidecar",
+        description="Convert one Warcraft III .mdx to ASCII FBX 7.4 with "
+                    "rest-pose geometry, normals, first UV set and texture "
+                    "path references. Animation and skinning are not applied.",
+        epilog=(
+            "Agent examples:\n"
+            "  w3xmpq mdx2fbx Footman.mdx -o Footman.fbx --json\n"
+            "  w3xmpq mdx2fbx War3.mpq \"Units\\Human\\Footman\\Footman.mdx\" \\\n"
+            "      -o Footman.fbx --json\n"
+            "  w3xmpq mdx2fbx Footman.mdx -o Footman.fbx \\\n"
+            "      --texture-map textures.json --json\n"
+            "\n"
+            "textures.json maps MDX paths to exported image paths, e.g.:\n"
+            "  {\"Textures\\\\footman.blp\": \"textures/footman.png\"}\n"
+            "\n"
+            "Every run writes <out>.fbx.json with counts, hashes and an "
+            "explicit unresolved[] list."),
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    pm.add_argument("source",
+                    help="loose .mdx file, or MPQ/.w3x archive when MEMBER is given")
+    pm.add_argument("member", nargs="?",
+                    help="MPQ member path inside SOURCE "
+                         "(e.g. Units\\Human\\Footman\\Footman.mdx)")
+    pm.add_argument("-o", "--out", help="output .fbx path (default: <model>.fbx)")
+    pm.add_argument("--sidecar", metavar="FILE",
+                    help="JSON report path (default: <out>.fbx.json)")
+    pm.add_argument("--no-sidecar", action="store_true",
+                    help="do not write the JSON sidecar")
+    pm.add_argument("--texture-map", metavar="JSON",
+                    help="JSON object mapping MDX texture paths to exported "
+                         "image paths")
+    pm.add_argument("--max-vertices", type=int, default=DEFAULT_MAX_VERTICES,
+                    help="vertex budget (default: %(default)s)")
+    pm.add_argument("--max-indices", type=int, default=DEFAULT_MAX_INDICES,
+                    help="index budget (default: %(default)s)")
+    pm.add_argument("--max-geosets", type=int, default=DEFAULT_MAX_GEOSETS,
+                    help="geoset budget (default: %(default)s)")
+    pm.add_argument("--json", action="store_true",
+                    help="print the report as JSON instead of a summary")
+    pm.set_defaults(func=cmd_mdx2fbx)
+
     pg = sub.add_parser("gui",
                         help="launch the graphical interface (needs PySide6)")
     pg.add_argument("archive", nargs="?", help="archive to open on start")
@@ -495,6 +604,7 @@ def _no_args_welcome():
     print('  w3xmpq scan   "C:\\path\\to\\map.w3x"          # safety scan')
     print('  w3xmpq diff   old.w3x new.w3x               # compare versions')
     print('  w3xmpq objects war3map.w3a                 # decode ability data')
+    print('  w3xmpq mdx2fbx Footman.mdx -o Footman.fbx  # static model export')
     print('  w3xmpq batch  "C:\\path\\to\\maps\\" -o out/     # bulk extraction')
     print('  w3xmpq gui    "C:\\path\\to\\map.w3x"          # graphical UI')
     print()

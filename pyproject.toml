@@ -5,13 +5,14 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "w3xmpq"
 version = "1.4.0"
-description = "Open any MPQ archive or Warcraft III map - recovers encrypted files via a known-plaintext attack, no listfile needed. Pure Python."
+description = "Open any MPQ archive or Warcraft III map, recover encrypted files without a listfile, decode object data, and export static MDX geometry to FBX. Pure Python."
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
 authors = [{ name = "w3xmpq contributors" }]
 keywords = ["mpq", "warcraft3", "wc3", "dota", "extractor", "jass",
-            "game-preservation", "reverse-engineering"]
+            "mdx", "fbx", "model-export", "game-preservation",
+            "reverse-engineering"]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Environment :: Console",

@@ -32,11 +32,19 @@ class TestCli(unittest.TestCase):
         self.assertEqual(r.returncode, 0)
         self.assertIn('w3xmpq', r.stdout)
         self.assertIn('extract', r.stdout)
+        self.assertIn('mdx2fbx', r.stdout)
 
     def test_version(self):
         r = _run(['--version'])
         self.assertEqual(r.returncode, 0)
         self.assertRegex(r.stdout, r'w3xmpq \d+\.\d+\.\d+')
+
+    def test_mdx2fbx_help(self):
+        r = _run(['mdx2fbx', '--help'])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn('Agent examples', r.stdout)
+        self.assertIn('--texture-map', r.stdout)
+        self.assertIn('--no-sidecar', r.stdout)
 
     def test_extract_quiet(self):
         with tempfile.TemporaryDirectory() as tmp:

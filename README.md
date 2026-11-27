@@ -1,12 +1,13 @@
 # w3xmpq
 
-> Open any MPQ. Crack any map. No listfile, no keys, no editor required.
+> Open any MPQ. Crack any map. Export its static models. No listfile, no keys, no editor required.
 
 **w3xmpq** is a pure-Python tool that opens `.mpq` archives and Warcraft III
 `.w3x`/`.w3m` maps, recovers every file — **including encrypted/protected
 ones** — via a known-plaintext attack on the MPQ sector offset table, and
 lets you list, extract, diff and batch-process them from a professional CLI
-or a 7-zip-style GUI.
+or a 7-zip-style GUI. It can also export bounded **static MDX geometry to FBX**
+with a machine-readable sidecar for automated asset pipelines.
 
 ![w3xmpq GUI](docs/images/gui_all_files.png)
 
@@ -96,6 +97,7 @@ encryption key from the data itself. Verified on real protected maps:
 - **Researchers** — key forensics, entropy analysis, `--json` everywhere.
 - **Archivists** — `batch` over thousands of maps with a CSV index.
 - **Developers** — a stable pure-Python MPQ engine (`from w3xmpq import …`).
+- **Asset-pipeline agents** — `mdx2fbx` emits deterministic FBX plus a JSON report of counts, hashes and unresolved data.
 
 ## Install
 
@@ -160,10 +162,54 @@ w3xmpq batch  ./maps/ -o out/            # bulk processing
 w3xmpq rebuild map.w3x -o fixed.w3x      # WorldEdit-ready copy
 w3xmpq blp    texture.blp -o out.png     # decode a Warcraft III texture
 w3xmpq objects war3map.w3a               # decode ability/unit/item overrides
+w3xmpq mdx2fbx Footman.mdx -o Footman.fbx --json
+                                         # static MDX -> FBX + JSON sidecar
+w3xmpq mdx2fbx War3.mpq "Units\Human\Footman\Footman.mdx" -o Footman.fbx --json
+                                         # same, straight from an MPQ member
 ```
 
 All commands accept `--json` for machine-readable output. Exit codes:
 `0` ok, `1` partial, `2` fatal.
+
+## MDX → FBX for Unity and agents
+
+`mdx2fbx` exports **rest-pose geometry only**: vertices, normals, the first UV
+set, texture path references and per-geoset materials. It writes ASCII FBX 7.4,
+which Unity's native FBX importer accepts without extra packages. Every run
+also writes `<out>.fbx.json` unless `--no-sidecar` is given.
+
+```bash
+# Loose file
+w3xmpq mdx2fbx Footman.mdx -o Footman.fbx --json
+
+# Directly from an archive; a bare stem resolves to .mdx
+w3xmpq mdx2fbx War3.mpq "Units\Human\Footman\Footman.mdx" -o Footman.fbx --json
+
+# Remap BLP references to already-exported PNG files
+w3xmpq mdx2fbx Footman.mdx -o Footman.fbx --texture-map textures.json --json
+```
+
+`--json` prints the same report that is saved to the sidecar:
+
+| Field | Meaning |
+|---|---|
+| `input` | `file` or `archive-member`, with the archive/member actually used |
+| `source_sha256`, `output.fbx_sha256` | deterministic hashes for caching and verification |
+| `model` | geoset/vertex/triangle counts, bounds, material and texture counts |
+| `geosets` | per-geoset counts, material id, UV sets and texture slots |
+| `texture_map` | normalized path mapping used for this run |
+| `limits`, `truncated`, `unresolved` | exactly what was bounded or left out |
+
+Agent-friendly defaults: vertex budget 50,000, index budget 150,000, geoset
+budget 128; all three are overridable. Exceeding a limit truncates and sets
+`truncated: true` — it never guesses missing geometry. Use `w3xmpq mdx2fbx
+--help` for the full contract and copy-paste examples.
+
+The converter is deliberately conservative. It does **not** apply animation,
+skin weights, material/texture animation, shader semantics, particle/light/
+ribbon emitters or texture pixels; those remain in `unresolved[]`. Export BLP
+textures with `w3xmpq blp` and pass `--texture-map` when a real material is
+needed. No screenshot parity with Warcraft III is claimed.
 
 ## How the crack works
 

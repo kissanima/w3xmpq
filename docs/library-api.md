@@ -168,6 +168,45 @@ w3xmpq extract War3x.mpq -o slk/ -f "MetaData"
 w3xmpq extract War3x.mpq -o slk/ -f "WorldEditStrings"
 ```
 
+### `w3xmpq.core.mdx2fbx` — static model export
+
+Converts one Warcraft III `.mdx` to ASCII FBX 7.4 and a JSON sidecar. It is a
+presentation converter: rest-pose vertices, normals, first UV set and texture
+path references are exported; animation, skinning, texture pixels and emitters
+are reported in `unresolved[]`, never guessed.
+
+| Function | Returns | Notes |
+|---|---|---|
+| `extract(data, max_vertices=50000, max_indices=150000, max_geosets=128)` | `dict` | Bounded geometry plan (`w3xmpq-mdx-geometry-v1`). Exceeding a limit sets `truncated: true`. |
+| `write_fbx(plan, texture_map=None)` | `str` | Deterministic FBX 7.4 ASCII text. |
+| `read_archive_member(archive_path, member)` | `(bytes, resolved_member)` | Direct hash probe; slash-normalizes and resolves a bare stem to `.mdx`. Returns `(None, None)` when absent. |
+| `normalise_member(member)` | `str` | Validates MPQ member paths and appends `.mdx` to a bare stem. |
+| `convert_mdx_to_fbx(data, out_path, sidecar_path=None, texture_map=None, ...)` | `dict` | Writes FBX + optional sidecar and returns the report (`w3xmpq-mdx2fbx-report-v1`). |
+
+`texture_map` is a dict mapping MDX texture paths to exported image paths;
+keys are normalized so `Textures\foo.blp` and `Textures/foo.blp` both match.
+Paths are written with forward slashes in FBX. Team-colour replaceable textures
+are intentionally not mapped.
+
+```python
+from w3xmpq.core.mdx2fbx import read_archive_member, convert_mdx_to_fbx
+
+data, member = read_archive_member("War3.mpq",
+                                   r"Units\Human\Footman\Footman.mdx")
+report = convert_mdx_to_fbx(
+    data, "Footman.fbx",
+    sidecar_path="Footman.fbx.json",
+    texture_map={r"Textures\footman.blp": "textures/footman.png"},
+    source_info={"kind": "archive-member", "archive": "War3.mpq",
+                 "member": member},
+)
+print(report["model"]["triangle_count"], report["unresolved"])
+```
+
+The same API is re-exported at package level as `w3xmpq.convert_mdx_to_fbx`
+and `w3xmpq.Mdx2FbxError`. The CLI equivalent is
+`w3xmpq mdx2fbx SOURCE [MEMBER] -o OUT.fbx --json`.
+
 ## Error handling
 
 - `scan_archive` / `extract_archive` never raise on individual bad blocks —
@@ -175,6 +214,8 @@ w3xmpq extract War3x.mpq -o slk/ -f "WorldEditStrings"
 - `extract_archive` returns a `manifest` dict; check `manifest["failed"]`
   before trusting the output.
 - `rebuild_map` raises `ValueError` on unreadable input maps.
+- `w3xmpq.core.mdx2fbx` raises `Mdx2FbxError` on invalid MDX chunks, unsafe
+  member paths or non-triangle geosets; write errors surface as `OSError`.
 
 ## Version
 

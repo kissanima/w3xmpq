@@ -18,3 +18,5 @@ from .core.mpq import MPQArchive                      # noqa: F401
 from .core.extract import open_archive, extract_archive  # noqa: F401
 from .core.keycrack import recover_base_key           # noqa: F401
 from .core.sectors import extract_block               # noqa: F401
+from .core.mdx2fbx import (Mdx2FbxError,               # noqa: F401
+                           convert_mdx_to_fbx)
