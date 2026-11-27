@@ -11,11 +11,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        # Python 3.9 has no x64 build for Ubuntu 26.04. Pin Linux to 24.04,
+        # which still has 3.9 builds, instead of letting `ubuntu-latest`
+        # drift past the last supported image.
+        os: [ubuntu-24.04, windows-latest]
         python: ['3.9', '3.10', '3.11', '3.12', '3.13']
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python }}
       - name: Install
