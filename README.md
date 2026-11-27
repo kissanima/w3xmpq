@@ -111,7 +111,7 @@ line needs `pip install Pillow` (saving it as `.jpg` does not).
 No-Python binaries (CLI **and** GUI) are on the
 [releases page](https://github.com/kissanima/w3xmpq/releases).
 
-## GUI (v1.4)
+## GUI (v1.5)
 
 ```bash
 w3xmpq gui map.w3x       # or download w3xmpq-gui.exe from releases
@@ -246,6 +246,7 @@ scan provides evidence for review — it is not a verdict.
 
 ## Docs
 
+- [docs/release-notes.md](docs/release-notes.md) — version history and release scope
 - [docs/how-it-works.md](docs/how-it-works.md) — the key-recovery math
 - [docs/deprotection-patterns.md](docs/deprotection-patterns.md) — protection patterns and what the report says about each
 - [docs/blp-format.md](docs/blp-format.md) — how Warcraft III textures really work (including the split JPEG frame header)

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "w3xmpq"
-version = "1.4.0"
+version = "1.5.0"
 description = "Open any MPQ archive or Warcraft III map, recover encrypted files without a listfile, decode object data, and export static MDX geometry to FBX. Pure Python."
 readme = "README.md"
 requires-python = ">=3.9"
